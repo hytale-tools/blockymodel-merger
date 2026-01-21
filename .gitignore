@@ -4,7 +4,9 @@ old/
 output/
 node_modules/
 
-# Go
+# Go binaries
+blockymerge
+extract-assets
 *.exe
 *.exe~
 *.dll
