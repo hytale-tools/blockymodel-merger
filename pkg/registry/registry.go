@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 )
 
-const dataDir = "data"
-const assetsDir = "assets"
+const (
+	defaultDataDir   = "data"
+	defaultAssetsDir = "assets"
+)
 
 // TextureEntry represents a pre-colored texture option
 type TextureEntry struct {
@@ -44,7 +46,9 @@ type ResolvedTexture struct {
 
 // Registry holds all accessory registries loaded from data/*.json
 type Registry struct {
-	entries map[string]map[string]AccessoryEntry // registryName -> id -> entry
+	entries    map[string]map[string]AccessoryEntry // registryName -> id -> entry
+	dataDir    string                                // Base path for data directory
+	assetsDir  string                                // Base path for assets directory
 }
 
 // Mapping from character data field names to registry file names
@@ -71,13 +75,30 @@ var fieldToRegistry = map[string]string{
 }
 
 // Load reads all registry files from the data directory
-func Load() (*Registry, error) {
+// If basePath is empty, uses default "data" and "assets" directories
+func Load(basePath ...string) (*Registry, error) {
+	var base string
+
+	if len(basePath) > 0 {
+		base = basePath[0]
+	}
+
+	dataDir := defaultDataDir
+	assetsDir := defaultAssetsDir
+	
+	if base != "" {
+		dataDir = filepath.Join(base, defaultDataDir)
+		assetsDir = filepath.Join(base, defaultAssetsDir)
+	}
+	
 	r := &Registry{
 		entries: make(map[string]map[string]AccessoryEntry),
+		dataDir: dataDir,
+		assetsDir: assetsDir,
 	}
 
 	for _, registryName := range fieldToRegistry {
-		path := filepath.Join(dataDir, registryName+".json")
+		path := filepath.Join(r.dataDir, registryName+".json")
 		if err := r.loadRegistry(registryName, path); err != nil {
 			// Skip missing registries with a warning
 			fmt.Printf("Warning: Could not load registry %s: %v\n", registryName, err)
@@ -155,7 +176,7 @@ func (r *Registry) LookupWithVariant(fieldType, id, variant string) (string, err
 	}
 
 	// Return full path relative to assets directory
-	return filepath.Join(assetsDir, modelPath), nil
+	return filepath.Join(r.assetsDir, modelPath), nil
 }
 
 // Lookup finds an accessory by field type and ID (no variant)
