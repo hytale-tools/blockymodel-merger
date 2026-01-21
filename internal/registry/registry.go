@@ -1,0 +1,233 @@
+package registry
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+const dataDir = "data"
+const assetsDir = "assets"
+
+// TextureEntry represents a pre-colored texture option
+type TextureEntry struct {
+	Texture   string   `json:"Texture"`
+	BaseColor []string `json:"BaseColor"`
+}
+
+// VariantEntry represents a variant option within an accessory
+type VariantEntry struct {
+	Model            string                  `json:"Model"`
+	GreyscaleTexture string                  `json:"GreyscaleTexture"`
+	Textures         map[string]TextureEntry `json:"Textures"` // For pre-colored textures
+}
+
+// AccessoryEntry represents an entry in a registry JSON file
+type AccessoryEntry struct {
+	ID               string                  `json:"Id"`
+	Name             string                  `json:"Name"`
+	Model            string                  `json:"Model"`
+	GreyscaleTexture string                  `json:"GreyscaleTexture"`
+	GradientSet      string                  `json:"GradientSet"`
+	Variants         map[string]VariantEntry `json:"Variants"`
+	Textures         map[string]TextureEntry `json:"Textures"` // For pre-colored textures at top level
+}
+
+// ResolvedTexture contains the resolved texture info for an accessory
+type ResolvedTexture struct {
+	GreyscaleTexture string   // Path to greyscale texture (for tinting)
+	GradientSet      string   // Gradient set name (for tinting)
+	DirectTexture    string   // Path to pre-colored texture (no tinting needed)
+	BaseColor        []string // Base colors for display
+}
+
+// Registry holds all accessory registries loaded from data/*.json
+type Registry struct {
+	entries map[string]map[string]AccessoryEntry // registryName -> id -> entry
+}
+
+// Mapping from character data field names to registry file names
+var fieldToRegistry = map[string]string{
+	"face":          "Faces",
+	"ears":          "Ears",
+	"eyes":          "Eyes",
+	"eyebrows":      "Eyebrows",
+	"mouth":         "Mouths",
+	"facialHair":    "FacialHair",
+	"haircut":       "Haircuts",
+	"underwear":     "Underwear",
+	"pants":         "Pants",
+	"overpants":     "Overpants",
+	"undertop":      "Undertops",
+	"overtop":       "Overtops",
+	"shoes":         "Shoes",
+	"gloves":        "Gloves",
+	"cape":          "Capes",
+	"headAccessory": "HeadAccessory",
+	"faceAccessory": "FaceAccessory",
+	"earAccessory":  "EarAccessory",
+	"skinFeature":   "SkinFeatures",
+}
+
+// Load reads all registry files from the data directory
+func Load() (*Registry, error) {
+	r := &Registry{
+		entries: make(map[string]map[string]AccessoryEntry),
+	}
+
+	for _, registryName := range fieldToRegistry {
+		path := filepath.Join(dataDir, registryName+".json")
+		if err := r.loadRegistry(registryName, path); err != nil {
+			// Skip missing registries with a warning
+			fmt.Printf("Warning: Could not load registry %s: %v\n", registryName, err)
+			continue
+		}
+	}
+
+	return r, nil
+}
+
+func (r *Registry) loadRegistry(name, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var entries []AccessoryEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return fmt.Errorf("failed to parse %s: %w", path, err)
+	}
+
+	r.entries[name] = make(map[string]AccessoryEntry)
+	for _, entry := range entries {
+		if entry.ID != "" {
+			r.entries[name][entry.ID] = entry
+		}
+	}
+
+	return nil
+}
+
+// LookupWithVariant finds an accessory by field type, ID, and optional variant
+func (r *Registry) LookupWithVariant(fieldType, id, variant string) (string, error) {
+	registryName, ok := fieldToRegistry[fieldType]
+	if !ok {
+		return "", fmt.Errorf("unknown field type: %s", fieldType)
+	}
+
+	registry, ok := r.entries[registryName]
+	if !ok {
+		return "", fmt.Errorf("registry not loaded: %s", registryName)
+	}
+
+	entry, ok := registry[id]
+	if !ok {
+		return "", fmt.Errorf("accessory '%s' not found in %s registry", id, registryName)
+	}
+
+	var modelPath string
+
+	// Check for variant first if specified
+	if variant != "" && entry.Variants != nil {
+		if variantEntry, ok := entry.Variants[variant]; ok {
+			modelPath = variantEntry.Model
+		}
+	}
+
+	// Fall back to top-level model
+	if modelPath == "" {
+		modelPath = entry.Model
+	}
+
+	// If still no model, try first variant as default
+	if modelPath == "" && entry.Variants != nil {
+		for _, v := range entry.Variants {
+			if v.Model != "" {
+				modelPath = v.Model
+				break
+			}
+		}
+	}
+
+	if modelPath == "" {
+		return "", fmt.Errorf("accessory '%s' has no model path (variant: %s)", id, variant)
+	}
+
+	// Return full path relative to assets directory
+	return filepath.Join(assetsDir, modelPath), nil
+}
+
+// Lookup finds an accessory by field type and ID (no variant)
+func (r *Registry) Lookup(fieldType, id string) (string, error) {
+	return r.LookupWithVariant(fieldType, id, "")
+}
+
+// GetEntry returns the full entry for an accessory (for texture info, etc.)
+func (r *Registry) GetEntry(fieldType, id string) (*AccessoryEntry, error) {
+	registryName, ok := fieldToRegistry[fieldType]
+	if !ok {
+		return nil, fmt.Errorf("unknown field type: %s", fieldType)
+	}
+
+	registry, ok := r.entries[registryName]
+	if !ok {
+		return nil, fmt.Errorf("registry not loaded: %s", registryName)
+	}
+
+	entry, ok := registry[id]
+	if !ok {
+		return nil, fmt.Errorf("accessory '%s' not found in %s registry", id, registryName)
+	}
+
+	return &entry, nil
+}
+
+// ResolveTexture finds the texture for an accessory given color and variant
+// Returns either a greyscale texture (for tinting) or a direct texture path
+func (r *Registry) ResolveTexture(fieldType, id, color, variant string) (*ResolvedTexture, error) {
+	entry, err := r.GetEntry(fieldType, id)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &ResolvedTexture{
+		GradientSet: entry.GradientSet,
+	}
+
+	// First check variant-level textures if variant is specified
+	if variant != "" && entry.Variants != nil {
+		if variantEntry, ok := entry.Variants[variant]; ok {
+			// Check for variant's Textures map (pre-colored)
+			if color != "" && variantEntry.Textures != nil {
+				if texEntry, ok := variantEntry.Textures[color]; ok {
+					result.DirectTexture = texEntry.Texture
+					result.BaseColor = texEntry.BaseColor
+					return result, nil
+				}
+			}
+			// Check for variant's greyscale texture
+			if variantEntry.GreyscaleTexture != "" {
+				result.GreyscaleTexture = variantEntry.GreyscaleTexture
+				return result, nil
+			}
+		}
+	}
+
+	// Check top-level Textures map (pre-colored)
+	if color != "" && entry.Textures != nil {
+		if texEntry, ok := entry.Textures[color]; ok {
+			result.DirectTexture = texEntry.Texture
+			result.BaseColor = texEntry.BaseColor
+			return result, nil
+		}
+	}
+
+	// Fall back to top-level greyscale texture
+	if entry.GreyscaleTexture != "" {
+		result.GreyscaleTexture = entry.GreyscaleTexture
+		return result, nil
+	}
+
+	return nil, fmt.Errorf("no texture found for %s (color: %s, variant: %s)", id, color, variant)
+}

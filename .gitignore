@@ -1,0 +1,14 @@
+assets/
+data/
+old/
+output/
+blockymerge
+node_modules/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+blockymerge
