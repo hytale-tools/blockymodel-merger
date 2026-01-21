@@ -205,6 +205,7 @@ func (r *Registry) GetEntry(fieldType, id string) (*AccessoryEntry, error) {
 
 // ResolveTexture finds the texture for an accessory given color and variant
 // Returns either a greyscale texture (for tinting) or a direct texture path
+// Paths are returned relative to base directory (e.g., "assets/Cosmetics/...")
 func (r *Registry) ResolveTexture(fieldType, id, color, variant string) (*ResolvedTexture, error) {
 	entry, err := r.GetEntry(fieldType, id)
 	if err != nil {
@@ -221,14 +222,15 @@ func (r *Registry) ResolveTexture(fieldType, id, color, variant string) (*Resolv
 			// Check for variant's Textures map (pre-colored)
 			if color != "" && variantEntry.Textures != nil {
 				if texEntry, ok := variantEntry.Textures[color]; ok {
-					result.DirectTexture = texEntry.Texture
+					// Prepend assets/ to texture path
+					result.DirectTexture = filepath.Join(defaultAssetsDir, texEntry.Texture)
 					result.BaseColor = texEntry.BaseColor
 					return result, nil
 				}
 			}
 			// Check for variant's greyscale texture
 			if variantEntry.GreyscaleTexture != "" {
-				result.GreyscaleTexture = variantEntry.GreyscaleTexture
+				result.GreyscaleTexture = filepath.Join(defaultAssetsDir, variantEntry.GreyscaleTexture)
 				return result, nil
 			}
 		}
@@ -237,7 +239,8 @@ func (r *Registry) ResolveTexture(fieldType, id, color, variant string) (*Resolv
 	// Check top-level Textures map (pre-colored)
 	if color != "" && entry.Textures != nil {
 		if texEntry, ok := entry.Textures[color]; ok {
-			result.DirectTexture = texEntry.Texture
+			// Prepend assets/ to texture path
+			result.DirectTexture = filepath.Join(defaultAssetsDir, texEntry.Texture)
 			result.BaseColor = texEntry.BaseColor
 			return result, nil
 		}
@@ -245,7 +248,7 @@ func (r *Registry) ResolveTexture(fieldType, id, color, variant string) (*Resolv
 
 	// Fall back to top-level greyscale texture
 	if entry.GreyscaleTexture != "" {
-		result.GreyscaleTexture = entry.GreyscaleTexture
+		result.GreyscaleTexture = filepath.Join(defaultAssetsDir, entry.GreyscaleTexture)
 		return result, nil
 	}
 
