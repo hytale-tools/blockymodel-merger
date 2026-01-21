@@ -3,6 +3,7 @@ data/
 old/
 output/
 blockymerge
+extract-assets
 node_modules/
 
 # Go
@@ -11,4 +12,5 @@ node_modules/
 *.dll
 *.so
 *.dylib
-blockymerge
+
+Assets.zip

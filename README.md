@@ -10,6 +10,99 @@ A tool for merging blockymodel files and exporting them as GLB (glTF Binary) for
 - Export to blockymodel format
 - Automatic texture atlas generation
 
+## Setup
+
+### Prerequisites
+
+- Go 1.21 or later ([download](https://go.dev/dl/))
+- Access to the game assets and registry data
+
+### Getting Started
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd blockymodel-merger
+   ```
+
+2. **Set up the `assets/` directory:**
+   
+   The `assets/` directory should contain:
+   - `Characters/` - Character model files (`.blockymodel`) and textures
+   - `Cosmetics/` - Cosmetic/accessory model files
+   - `TintGradients/` - Gradient textures for tinting
+   
+   **How to obtain assets:**
+   
+   1. Download `assets.zip` from the [Hytale Server Manual](https://support.hytale.com/hc/en-us/articles/45326769420827-Hytale-Server-Manual#server-setup)
+   
+      **Important:** You need the **server** assets.zip (not the client version), as it includes the `data/` directory with registry JSON files.
+   
+   2. Use the extraction utility:
+      ```bash
+      # Build the extractor
+      go build -o extract-assets ./cmd/extract-assets
+      
+      # Extract required folders from assets.zip
+      ./extract-assets /path/to/assets.zip
+      ```
+   
+   This will extract and map:
+   - `Common/Characters` → `assets/Characters/`
+   - `Common/Cosmetics` → `assets/Cosmetics/`
+   - `Common/TintGradients` → `assets/TintGradients/`
+   - `Cosmetics/CharacterCreator` → `data/` (registry JSON files)
+   
+   The directory structure should match:
+     ```
+     assets/
+     ├── Characters/
+     │   ├── Player.blockymodel
+     │   ├── Player_Textures/
+     │   ├── Haircuts/
+     │   ├── Body_Attachments/
+     │   └── ...
+     ├── Cosmetics/
+     └── TintGradients/
+     ```
+
+3. **Verify the `data/` directory:**
+   
+   The extraction utility will also extract the `data/` directory from the server assets.zip. This contains JSON registry files that map accessory IDs to their model files and textures:
+   - `Haircuts.json` - Hair style definitions
+   - `Faces.json` - Face texture definitions
+   - `Eyes.json` - Eye style definitions
+   - `Pants.json`, `Overtops.json`, etc. - Clothing definitions
+   - `GradientSets.json` - Gradient tint definitions
+   - And other registry files...
+   
+   **Note:** The client assets.zip does not include the `data/` directory - you must use the server assets.zip from the Hytale Server Manual.
+
+4. **Verify your setup:**
+   ```bash
+   # Check that required directories exist
+   ls assets/Characters/Player.blockymodel
+   ls data/Haircuts.json
+   ls data/GradientSets.json
+   ```
+
+5. **Build the tool:**
+   ```bash
+   go build -o blockymerge ./cmd/blockymerge
+   ```
+
+6. **Test with a character file:**
+   ```bash
+   # Create a simple test character
+   echo '{"bodyCharacteristic": "Default.02", "haircut": "Scavenger_Hair.PitchBlack"}' > test-char.json
+   
+   # Run the merger
+   ./blockymerge -char test-char.json -out test
+   
+   # Check output
+   ls output/test.*
+   ```
+
 ## Building
 
 ```bash
@@ -114,8 +207,10 @@ Files are saved to the `output/` directory:
 ```
 blockymodel-merger/
 ├── cmd/
-│   └── blockymerge/
-│       └── main.go          # CLI entry point
+│   ├── blockymerge/
+│   │   └── main.go          # CLI entry point
+│   └── extract-assets/
+│       └── main.go          # Assets extraction utility
 ├── internal/
 │   ├── blockymodel/         # BlockyModel parsing
 │   ├── character/           # Character data loading
@@ -131,8 +226,25 @@ blockymodel-merger/
 ## Requirements
 
 - Go 1.21+
-- Asset files in `assets/` directory
-- Registry data in `data/` directory
+- Asset files in `assets/` directory (see Setup section above)
+- Registry data in `data/` directory (see Setup section above)
+
+## Troubleshooting
+
+### "Failed to load registry" error
+
+Make sure the `data/` directory exists and contains the required JSON registry files. The tool looks for files like `Haircuts.json`, `Faces.json`, `Eyes.json`, etc.
+
+### "Failed to load base model" error
+
+Ensure `assets/Characters/Player.blockymodel` exists. This is the base player model that all characters are built from.
+
+### "Could not load texture" warnings
+
+These are usually non-fatal - the tool will continue but the accessory may appear without textures. Check that:
+- Texture paths in the registry JSON files are correct
+- The texture files exist in the `assets/` directory
+- Path separators match your OS (use forward slashes `/` in JSON files)
 
 ## Dependencies
 
