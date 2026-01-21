@@ -215,7 +215,7 @@ blockymodel-merger/
 │   │   └── main.go          # CLI entry point
 │   └── extract-assets/
 │       └── main.go          # Assets extraction utility
-├── internal/
+├── pkg/
 │   ├── blockymodel/         # BlockyModel parsing
 │   ├── character/           # Character data loading
 │   ├── export/              # GLB export

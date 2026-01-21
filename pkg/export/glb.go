@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"blockymerge/internal/blockymodel"
+	"blockymerge/pkg/blockymodel"
 	"math"
 
 	"github.com/qmuntal/gltf"

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"blockymerge/internal/registry"
+	"blockymerge/pkg/registry"
 )
 
 // Load reads a character data JSON file

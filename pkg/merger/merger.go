@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"blockymerge/internal/blockymodel"
+	"blockymerge/pkg/blockymodel"
 )
 
 // Merger handles merging accessories into a base model

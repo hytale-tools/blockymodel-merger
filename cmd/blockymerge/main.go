@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"blockymerge/internal/blockymodel"
-	"blockymerge/internal/character"
-	"blockymerge/internal/export"
-	"blockymerge/internal/merger"
-	"blockymerge/internal/registry"
-	"blockymerge/internal/texture"
+	"blockymerge/pkg/blockymodel"
+	"blockymerge/pkg/character"
+	"blockymerge/pkg/export"
+	"blockymerge/pkg/merger"
+	"blockymerge/pkg/registry"
+	"blockymerge/pkg/texture"
 )
 
 const (
