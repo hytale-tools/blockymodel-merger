@@ -2,8 +2,6 @@ assets/
 data/
 old/
 output/
-blockymerge
-extract-assets
 node_modules/
 
 # Go
