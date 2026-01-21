@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"blockymerge/pkg/blockymodel"
+	"github.com/hytale-tools/blockymodel-merger/pkg/blockymodel"
 )
 
 // Merger handles merging accessories into a base model

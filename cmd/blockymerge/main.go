@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"blockymerge/pkg/blockymodel"
-	"blockymerge/pkg/character"
-	"blockymerge/pkg/export"
-	"blockymerge/pkg/merger"
-	"blockymerge/pkg/registry"
-	"blockymerge/pkg/texture"
+	"github.com/hytale-tools/blockymodel-merger/pkg/blockymodel"
+	"github.com/hytale-tools/blockymodel-merger/pkg/character"
+	"github.com/hytale-tools/blockymodel-merger/pkg/export"
+	"github.com/hytale-tools/blockymodel-merger/pkg/merger"
+	"github.com/hytale-tools/blockymodel-merger/pkg/registry"
+	"github.com/hytale-tools/blockymodel-merger/pkg/texture"
 )
 
 const (

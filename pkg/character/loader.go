@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"blockymerge/pkg/registry"
+	"github.com/hytale-tools/blockymodel-merger/pkg/registry"
 )
 
 // Load reads a character data JSON file

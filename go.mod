@@ -1,4 +1,4 @@
-module blockymerge
+module github.com/hytale-tools/blockymodel-merger
 
 go 1.21
 
