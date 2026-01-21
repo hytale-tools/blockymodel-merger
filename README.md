@@ -2,6 +2,8 @@
 
 A tool for merging blockymodel files and exporting them as GLB (glTF Binary) format. Takes a base player model and merges accessories (clothing, hair, face features, etc.) based on a character configuration file.
 
+> **Note:** This project is provided as-is. No support or assistance will be provided. Please refer to the documentation and troubleshooting section for help.
+
 ## Features
 
 - Merge multiple blockymodel files into a single model
