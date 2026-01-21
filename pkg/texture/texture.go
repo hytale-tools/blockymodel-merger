@@ -93,14 +93,18 @@ func (gs *GradientSets) GetGradient(setName, colorName string) (*GradientEntry, 
 
 // LoadImage loads a PNG image from the assets directory
 // If basePath is provided, uses it; otherwise uses default "assets" directory
+// relativePath may already include "assets/" prefix - if basePath is provided, it will be joined correctly
 func LoadImage(relativePath string, basePath ...string) (image.Image, error) {
-	assetsDir := defaultAssetsDir
-
+	var path string
+	
 	if len(basePath) > 0 && basePath[0] != "" {
-		assetsDir = filepath.Join(basePath[0], defaultAssetsDir)
+		// Base path provided - join directly (relativePath may already include "assets/")
+		path = filepath.Join(basePath[0], relativePath)
+	} else {
+		// No base path - use default assets directory
+		path = filepath.Join(defaultAssetsDir, relativePath)
 	}
 	
-	path := filepath.Join(assetsDir, relativePath)
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open image %s: %w", path, err)

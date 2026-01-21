@@ -78,11 +78,9 @@ var fieldToRegistry = map[string]string{
 // If basePath is empty, uses default "data" and "assets" directories
 func Load(basePath ...string) (*Registry, error) {
 	var base string
-
 	if len(basePath) > 0 {
 		base = basePath[0]
 	}
-
 	dataDir := defaultDataDir
 	assetsDir := defaultAssetsDir
 	
@@ -175,8 +173,9 @@ func (r *Registry) LookupWithVariant(fieldType, id, variant string) (string, err
 		return "", fmt.Errorf("accessory '%s' has no model path (variant: %s)", id, variant)
 	}
 
-	// Return full path relative to assets directory
-	return filepath.Join(r.assetsDir, modelPath), nil
+	// Return path relative to base directory (e.g., "assets/Cosmetics/...")
+	// The caller will join this with their base directory
+	return filepath.Join(defaultAssetsDir, modelPath), nil
 }
 
 // Lookup finds an accessory by field type and ID (no variant)
