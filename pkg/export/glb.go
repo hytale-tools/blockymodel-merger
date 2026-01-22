@@ -2,7 +2,6 @@ package export
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 
 	"github.com/hytale-tools/blockymodel-merger/pkg/blockymodel"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
+	"github.com/hytale-tools/blockymodel-merger/pkg/util"
 )
 
 // GLBExporter exports BlockyModel to GLB format matching Blockbench's output exactly
@@ -682,14 +682,18 @@ func (e *GLBExporter) createQuadMesh(node *blockymodel.Node, materialIdx uint32,
 			uvs = e.calculateUVs(layout, origSizeX, origSizeY)
 			// Debug: log eyelid UVs
 			if strings.Contains(strings.ToLower(node.Name), "eyelid") {
-				fmt.Printf("DEBUG %s: textureLayout=%+v, size=(%.0f,%.0f), uvs=%v\n", 
-					node.Name, layout, origSizeX, origSizeY, uvs)
+				util.Logger.Debug("Eyelid texture layout",
+					"node", node.Name,
+					"layout", layout,
+					"sizeX", origSizeX,
+					"sizeY", origSizeY,
+					"uvs", uvs)
 			}
 		}
 	} else {
 		// Debug: log when textureLayout is nil
 		if strings.Contains(strings.ToLower(node.Name), "eyelid") {
-			fmt.Printf("DEBUG %s: TextureLayout is NIL\n", node.Name)
+			util.Logger.Debug("Eyelid texture layout is nil", "node", node.Name)
 		}
 	}
 

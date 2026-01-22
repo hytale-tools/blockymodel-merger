@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/hytale-tools/blockymodel-merger/pkg/blockymodel"
+	"github.com/hytale-tools/blockymodel-merger/pkg/util"
 )
 
 // Merger handles merging accessories into a base model
@@ -56,7 +57,8 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) 
 	if accessoryNode.IsSkeletonReference() || (baseNode != nil && accessoryNode.Shape != nil && accessoryNode.Shape.Type == "none") {
 		// This is an attachment point - attach children to base model
 		if baseNode == nil {
-			fmt.Printf("Warning: no matching attachment point '%s' found in base model\n", accessoryNode.Name)
+			util.Logger.Warn("No matching attachment point found in base model",
+				"node", accessoryNode.Name)
 			return nil
 		}
 

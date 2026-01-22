@@ -13,22 +13,28 @@ import (
 	"github.com/hytale-tools/blockymodel-merger/pkg/merger"
 	"github.com/hytale-tools/blockymodel-merger/pkg/registry"
 	"github.com/hytale-tools/blockymodel-merger/pkg/texture"
+	"github.com/hytale-tools/blockymodel-merger/pkg/util"
 )
 
 const (
 	basePath        = "assets/Characters/Player.blockymodel"
-	baseTexturePath = "Characters/Player_Textures/Player_Greyscale.png"
+	baseTexturePath = "assets/Characters/Player_Textures/Player_Greyscale.png"
 	outputDir       = "output"
 	defaultOutput   = "merged"
 )
 
 func main() {
 	debug := flag.Bool("debug", false, "Print debug output showing node tree")
+	verbose := flag.Bool("verbose", false, "Print verbose output (info messages)")
 	charFile := flag.String("char", "", "Path to character JSON file")
 	outputName := flag.String("out", defaultOutput, "Output file name (without extension)")
 	formatFlag := flag.String("format", "both", "Output format: glb, blockymodel, or both")
 	noTint := flag.Bool("no-tint", false, "Skip texture tinting (output raw greyscale)")
 	flag.Parse()
+
+	// Initialize verbose mode (checks env var, CLI flag takes precedence)
+	verboseEnabled := *verbose || os.Getenv("BLOCKYMERGE_VERBOSE") != ""
+	util.SetVerbose(&verboseEnabled)
 
 	var accessoryPaths []character.AccessoryPath
 	var gradientSets *texture.GradientSets
@@ -40,44 +46,45 @@ func main() {
 		var err error
 		gradientSets, err = texture.LoadGradientSets()
 		if err != nil {
-			fmt.Printf("Warning: Could not load gradient sets: %v\n", err)
+			util.Logger.Warn("Could not load gradient sets", "error", err)
 		}
 
 		// Load accessory registry
-		fmt.Println("Loading accessory registry...")
+		util.Logger.Info("Loading accessory registry")
 		reg, err := registry.Load()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading registry: %v\n", err)
+			util.Logger.Error("Error loading registry", "error", err)
 			os.Exit(1)
 		}
 
 		// Load character data
-		fmt.Printf("Loading character data: %s\n", *charFile)
+		util.Logger.Info("Loading character data", "file", *charFile)
 		charData, err = character.Load(*charFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading character file: %v\n", err)
+			util.Logger.Error("Error loading character file", "file", *charFile, "error", err)
 			os.Exit(1)
 		}
 
 		result, err := charData.ResolveAccessories(reg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error resolving accessories: %v\n", err)
+			util.Logger.Error("Error resolving accessories", "error", err)
 			os.Exit(1)
 		}
 
 		if len(result.Warnings) > 0 {
-			fmt.Println("Warnings:")
+			util.Logger.Warn("Warnings encountered", "count", len(result.Warnings))
 			for _, warn := range result.Warnings {
-				fmt.Printf("  ! %s\n", warn)
+				util.Logger.Warn("Warning", "message", warn)
 			}
-			fmt.Println()
 		}
 
-		fmt.Printf("Resolved %d accessories:\n", len(result.Accessories))
+		util.Logger.Info("Resolved accessories", "count", len(result.Accessories))
 		for _, acc := range result.Accessories {
-			fmt.Printf("  - %s: %s → %s\n", acc.Type, acc.Spec.ID, acc.Path)
+			util.Logger.Debug("Accessory resolved",
+				"type", acc.Type,
+				"id", acc.Spec.ID,
+				"path", acc.Path)
 		}
-		fmt.Println()
 
 		accessoryPaths = result.Accessories
 	} else {
@@ -96,32 +103,32 @@ func main() {
 	}
 
 	// Load base player model
-	fmt.Printf("Loading base model: %s\n", basePath)
+	util.Logger.Info("Loading base model", "path", basePath)
 	base, err := blockymodel.Load(basePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading base model: %v\n", err)
+		util.Logger.Error("Error loading base model", "path", basePath, "error", err)
 		os.Exit(1)
 	}
 
 	// Create merger
 	m, err := merger.New(base)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating merger: %v\n", err)
+		util.Logger.Error("Error creating merger", "error", err)
 		os.Exit(1)
 	}
 
 	// Merge each accessory
 	for _, acc := range accessoryPaths {
-		fmt.Printf("Merging: %s\n", acc.Path)
+		util.Logger.Info("Merging accessory", "path", acc.Path)
 		accessory, err := blockymodel.Load(acc.Path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading accessory %s: %v\n", acc.Path, err)
+			util.Logger.Error("Error loading accessory", "path", acc.Path, "error", err)
 			os.Exit(1)
 		}
 
 		// Use accessory spec ID as the identifier for tracking texture offsets
 		if err := m.Merge(accessory, acc.Spec.ID); err != nil {
-			fmt.Fprintf(os.Stderr, "Error merging accessory %s: %v\n", acc.Path, err)
+			util.Logger.Error("Error merging accessory", "path", acc.Path, "error", err)
 			os.Exit(1)
 		}
 	}
@@ -138,7 +145,7 @@ func main() {
 
 	// Ensure output directory exists
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
+		util.Logger.Error("Error creating output directory", "dir", outputDir, "error", err)
 		os.Exit(1)
 	}
 
@@ -154,9 +161,9 @@ func main() {
 		skinTone := charData.GetSkinTone()
 
 		// Load and tint base player texture
-		fmt.Println("\nLoading base texture...")
+		util.Logger.Info("Loading base texture")
 		if skinTone != "" {
-			fmt.Printf("  Tinting base with skin tone: %s\n", skinTone)
+			util.Logger.Info("Tinting base with skin tone", "skinTone", skinTone)
 			baseTinted, err := texture.ProcessAccessoryTexture(
 				"_base",
 				baseTexturePath,
@@ -165,31 +172,35 @@ func main() {
 				gradientSets,
 			)
 			if err != nil {
-				fmt.Printf("  Warning: Could not tint base texture: %v\n", err)
+				util.Logger.Warn("Could not tint base texture", "error", err)
 			} else {
-				fmt.Printf("  ✓ Base texture tinted: %dx%d\n", baseTinted.Image.Bounds().Dx(), baseTinted.Image.Bounds().Dy())
+				util.Logger.Info("Base texture tinted",
+					"width", baseTinted.Image.Bounds().Dx(),
+					"height", baseTinted.Image.Bounds().Dy())
 				tintedTextures = append(tintedTextures, baseTinted)
 			}
 		} else {
 			// No skin tone - load base texture without tinting
 			baseImg, err := texture.LoadImage(baseTexturePath)
 			if err != nil {
-				fmt.Printf("  Warning: Could not load base texture: %v\n", err)
+				util.Logger.Warn("Could not load base texture", "error", err)
 			} else {
 				baseTex := &texture.TintedTexture{
 					Name:         "_base",
 					Image:        baseImg,
 					OriginalPath: baseTexturePath,
 				}
-				fmt.Printf("  ✓ Base texture: %dx%d (no skin tone)\n", baseImg.Bounds().Dx(), baseImg.Bounds().Dy())
+				util.Logger.Info("Base texture loaded (no skin tone)",
+					"width", baseImg.Bounds().Dx(),
+					"height", baseImg.Bounds().Dy())
 				tintedTextures = append(tintedTextures, baseTex)
 			}
 		}
 
-		fmt.Println("\nProcessing accessory textures...")
+		util.Logger.Info("Processing accessory textures")
 		for _, acc := range accessoryPaths {
 			if acc.ResolvedTexture == nil {
-				fmt.Printf("  Skipping %s: no texture info\n", acc.Spec.ID)
+				util.Logger.Debug("Skipping accessory: no texture info", "id", acc.Spec.ID)
 				continue
 			}
 
@@ -198,10 +209,10 @@ func main() {
 
 			if acc.ResolvedTexture.DirectTexture != "" {
 				// Pre-colored texture - load directly without tinting
-				fmt.Printf("  Loading direct: %s\n", acc.Spec.ID)
+				util.Logger.Debug("Loading direct texture", "id", acc.Spec.ID, "path", acc.ResolvedTexture.DirectTexture)
 				img, loadErr := texture.LoadImage(acc.ResolvedTexture.DirectTexture)
 				if loadErr != nil {
-					fmt.Printf("    Warning: %v\n", loadErr)
+					util.Logger.Warn("Failed to load direct texture", "id", acc.Spec.ID, "error", loadErr)
 					continue
 				}
 				tinted = &texture.TintedTexture{
@@ -211,7 +222,10 @@ func main() {
 				}
 			} else if acc.ResolvedTexture.GreyscaleTexture != "" {
 				// Greyscale texture - apply tinting
-				fmt.Printf("  Tinting: %s (gradient=%s, color=%s)\n", acc.Spec.ID, acc.ResolvedTexture.GradientSet, acc.Spec.Color)
+				util.Logger.Debug("Tinting texture",
+					"id", acc.Spec.ID,
+					"gradientSet", acc.ResolvedTexture.GradientSet,
+					"color", acc.Spec.Color)
 				tinted, err = texture.ProcessAccessoryTexture(
 					acc.Spec.ID,
 					acc.ResolvedTexture.GreyscaleTexture,
@@ -220,11 +234,11 @@ func main() {
 					gradientSets,
 				)
 				if err != nil {
-					fmt.Printf("    Warning: %v\n", err)
+					util.Logger.Warn("Failed to process accessory texture", "id", acc.Spec.ID, "error", err)
 					continue
 				}
 			} else {
-				fmt.Printf("  Skipping %s: no texture path\n", acc.Spec.ID)
+				util.Logger.Debug("Skipping accessory: no texture path", "id", acc.Spec.ID)
 				continue
 			}
 
@@ -233,16 +247,19 @@ func main() {
 
 		// Pack textures into atlas using simple linear layout (base texture at 0,0)
 		if len(tintedTextures) > 0 {
-			fmt.Println("\nPacking texture atlas...")
+			util.Logger.Info("Packing texture atlas")
 			var err error
 			atlas, err = texture.PackAtlasSimple(tintedTextures, 1)
 			if err != nil {
-				fmt.Printf("  Warning: Failed to pack atlas: %v\n", err)
+				util.Logger.Warn("Failed to pack atlas", "error", err)
 			} else {
-				fmt.Printf("  ✓ Atlas packed: %dx%d (%d textures)\n", atlas.Width, atlas.Height, len(atlas.Entries))
+				util.Logger.Info("Atlas packed",
+					"width", atlas.Width,
+					"height", atlas.Height,
+					"textureCount", len(atlas.Entries))
 
 				// Update texture offsets in the merged model for each accessory
-				fmt.Println("\nUpdating texture offsets...")
+				util.Logger.Info("Updating texture offsets")
 				for _, tex := range tintedTextures {
 					if tex.Name == "_base" {
 						continue // Base texture stays at origin
@@ -264,7 +281,11 @@ func main() {
 					if len(nodeIDs) > 0 {
 						offset := blockymodel.AtlasOffset{X: float64(x), Y: float64(y)}
 						blockymodel.UpdateTextureOffsets(result.Nodes, nodeIDs, offset)
-						fmt.Printf("  ✓ %s: offset +(%d, %d) applied to %d nodes\n", tex.Name, x, y, len(nodeIDs))
+						util.Logger.Debug("Applied texture offset",
+							"texture", tex.Name,
+							"offsetX", x,
+							"offsetY", y,
+							"nodeCount", len(nodeIDs))
 					}
 				}
 			}
@@ -274,7 +295,7 @@ func main() {
 	// Export GLB
 	if outputGLB {
 		glbPath := filepath.Join(outputDir, *outputName+".glb")
-		fmt.Printf("\nExporting GLB: %s\n", glbPath)
+		util.Logger.Info("Exporting GLB", "path", glbPath)
 
 		exporter := export.NewGLBExporter()
 
@@ -282,13 +303,13 @@ func main() {
 		var materialIdx uint32
 		if atlas != nil {
 			w, h := atlas.Image.Bounds().Dx(), atlas.Image.Bounds().Dy()
-			fmt.Printf("  Atlas dimensions for UV: %dx%d\n", w, h)
+			util.Logger.Debug("Atlas dimensions for UV", "width", w, "height", h)
 			exporter.SetAtlasSize(float64(w), float64(h))
 
 			// Encode atlas to PNG bytes
 			atlasBytes, err := texture.EncodePNG(atlas.Image)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error encoding atlas: %v\n", err)
+				util.Logger.Error("Error encoding atlas", "error", err)
 				os.Exit(1)
 			}
 
@@ -301,41 +322,44 @@ func main() {
 		}
 
 		if err := exporter.ExportModel(result, materialIdx); err != nil {
-			fmt.Fprintf(os.Stderr, "Error exporting GLB: %v\n", err)
+			util.Logger.Error("Error exporting GLB", "error", err)
 			os.Exit(1)
 		}
 
 		if err := exporter.Save(glbPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Error saving GLB: %v\n", err)
+			util.Logger.Error("Error saving GLB", "path", glbPath, "error", err)
 			os.Exit(1)
 		}
-		fmt.Printf("  ✓ GLB saved\n")
+		util.Logger.Info("GLB saved", "path", glbPath)
 	}
 
 	// Export BlockyModel
 	if outputBlocky {
 		blockyPath := filepath.Join(outputDir, *outputName+".blockymodel")
-		fmt.Printf("\nExporting BlockyModel: %s\n", blockyPath)
+		util.Logger.Info("Exporting BlockyModel", "path", blockyPath)
 
 		if err := blockymodel.Save(result, blockyPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Error saving BlockyModel: %v\n", err)
+			util.Logger.Error("Error saving BlockyModel", "path", blockyPath, "error", err)
 			os.Exit(1)
 		}
-		fmt.Printf("  ✓ BlockyModel saved\n")
+		util.Logger.Info("BlockyModel saved", "path", blockyPath)
 	}
 
 	// Save atlas
 	if atlas != nil {
 		atlasPath := filepath.Join(outputDir, *outputName+"_atlas.png")
-		fmt.Printf("\nSaving texture atlas: %s\n", atlasPath)
+		util.Logger.Info("Saving texture atlas", "path", atlasPath)
 		if err := texture.SaveImage(atlas.Image, atlasPath); err != nil {
-			fmt.Printf("  Warning: Failed to save atlas: %v\n", err)
+			util.Logger.Warn("Failed to save atlas", "path", atlasPath, "error", err)
 		} else {
-			fmt.Printf("  ✓ Atlas saved (%dx%d)\n", atlas.Width, atlas.Height)
+			util.Logger.Info("Atlas saved",
+				"path", atlasPath,
+				"width", atlas.Width,
+				"height", atlas.Height)
 		}
 	}
 
-	fmt.Println("\nDone!")
+	util.Logger.Info("Done")
 }
 
 func printUsage() {
@@ -348,7 +372,11 @@ func printUsage() {
 	fmt.Println("  -out       Output file name without extension (default: merged)")
 	fmt.Println("  -format    Output format: glb, blockymodel, or both (default: both)")
 	fmt.Println("  -no-tint   Skip texture tinting")
+	fmt.Println("  -verbose   Print verbose output (info messages)")
 	fmt.Println("  -debug     Print merged node tree")
+	fmt.Println()
+	fmt.Println("Environment Variables:")
+	fmt.Println("  BLOCKYMERGE_VERBOSE  Set to any value to enable verbose output")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  blockymerge -char example-character-data.json")

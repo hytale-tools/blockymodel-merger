@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/hytale-tools/blockymodel-merger/pkg/util"
 )
 
 const (
@@ -115,7 +117,9 @@ func Load(basePath ...string) (*Registry, error) {
 		path := filepath.Join(r.dataDir, registryName+".json")
 		if err := r.loadRegistry(registryName, path); err != nil {
 			// Skip missing registries with a warning
-			fmt.Printf("Warning: Could not load registry %s: %v\n", registryName, err)
+			util.Logger.Warn("Could not load registry",
+				"registry", registryName,
+				"error", err)
 			continue
 		}
 	}

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/hytale-tools/blockymodel-merger/pkg/util"
 )
 
 const (
@@ -111,12 +113,22 @@ func (gs *GradientSets) GetGradient(setName, colorName string) (*GradientEntry, 
 func LoadImage(relativePath string, basePath ...string) (image.Image, error) {
 	var path string
 	
+	// Check if path already starts with assets/ (handle both / and filepath.Separator)
+	hasAssetsPrefix := strings.HasPrefix(relativePath, "assets/") || 
+		strings.HasPrefix(relativePath, "assets"+string(filepath.Separator))
+	
 	if len(basePath) > 0 && basePath[0] != "" {
-		// Base path provided - join directly (relativePath may already include "assets/")
+		// Base path provided - join directly
 		path = filepath.Join(basePath[0], relativePath)
 	} else {
-		// No base path - use default assets directory
-		path = filepath.Join(defaultAssetsDir, relativePath)
+		// No base path - check if relativePath already has assets/ prefix
+		if hasAssetsPrefix {
+			// Already has assets/ prefix, use as-is
+			path = relativePath
+		} else {
+			// No assets/ prefix, add it
+			path = filepath.Join(defaultAssetsDir, relativePath)
+		}
 	}
 	
 	f, err := os.Open(path)
@@ -283,10 +295,15 @@ func ApplyGradientTintWithSet(greyscale image.Image, gradientPath string, baseCo
 		gradient, err = LoadImage(gradientPath, baseAssetsPath...)
 		if err != nil {
 			// Fall back to base color
-			fmt.Printf("    Note: Gradient file not found (%s), using base color\n", gradientPath)
+			util.Logger.Debug("Gradient file not found, using base color",
+				"path", gradientPath,
+				"error", err)
 			gradient = nil
 		} else {
-			fmt.Printf("    → Loaded gradient: %dx%d\n", gradient.Bounds().Dx(), gradient.Bounds().Dy())
+			util.Logger.Debug("Loaded gradient",
+				"path", gradientPath,
+				"width", gradient.Bounds().Dx(),
+				"height", gradient.Bounds().Dy())
 		}
 	}
 
@@ -296,7 +313,7 @@ func ApplyGradientTintWithSet(greyscale image.Image, gradientPath string, baseCo
 		var err error
 		baseR, baseG, baseB, err = ParseHexColor(baseColor)
 		if err != nil {
-			fmt.Printf("  Warning: Invalid base color %s\n", baseColor)
+			util.Logger.Warn("Invalid base color", "color", baseColor, "error", err)
 		}
 	}
 
@@ -393,17 +410,25 @@ func ProcessAccessoryTexture(
 	if gradientSet != "" && colorName != "" && gradientSets != nil {
 		gradient, err := gradientSets.GetGradient(gradientSet, colorName)
 		if err != nil {
-			fmt.Printf("    Warning: %v, using default\n", err)
+			util.Logger.Warn("Failed to get gradient, using default",
+				"gradientSet", gradientSet,
+				"color", colorName,
+				"error", err)
 		} else {
 			// Prepend assets/ to gradient path (gradient paths from JSON are relative to assets)
 			gradientPath = filepath.Join(assetsDirName, gradient.Texture)
 			if len(gradient.BaseColor) > 0 {
 				baseColor = gradient.BaseColor[0]
 			}
-			fmt.Printf("    → Using gradient: %s\n", gradientPath)
+			util.Logger.Debug("Using gradient",
+				"path", gradientPath,
+				"gradientSet", gradientSet,
+				"color", colorName)
 		}
 	} else {
-		fmt.Printf("    → No gradient (set=%q, color=%q)\n", gradientSet, colorName)
+		util.Logger.Debug("No gradient specified",
+			"gradientSet", gradientSet,
+			"color", colorName)
 	}
 
 	// Apply tinting (pass basePath - LoadImage will handle the assets/ prefix in gradientPath)
