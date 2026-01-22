@@ -45,11 +45,9 @@ func LoadGradientSets(basePath ...string) (*GradientSets, error) {
 	if len(basePath) > 0 {
 		base = basePath[0]
 	}
-
 	if len(basePath) > 1 {
 		dataDirName = basePath[1]
 	}
-
 	if len(basePath) > 2 {
 		assetsDirName = basePath[2]
 	}
@@ -57,7 +55,6 @@ func LoadGradientSets(basePath ...string) (*GradientSets, error) {
 	if dataDirName == "" {
 		dataDirName = defaultDataDir
 	}
-
 	if assetsDirName == "" {
 		assetsDirName = defaultAssetsDir
 	}
@@ -377,11 +374,9 @@ func ProcessAccessoryTexture(
 		// Extract base path from assetsDir (remove assets directory name suffix)
 		assetsDir := gradientSets.assetsDir
 		assetsDirName = filepath.Base(assetsDir)
-
 		if assetsDirName == "" {
 			assetsDirName = defaultAssetsDir
 		}
-
 		basePath = filepath.Dir(assetsDir)
 	} else {
 		assetsDirName = defaultAssetsDir
@@ -402,7 +397,6 @@ func ProcessAccessoryTexture(
 		} else {
 			// Prepend assets/ to gradient path (gradient paths from JSON are relative to assets)
 			gradientPath = filepath.Join(assetsDirName, gradient.Texture)
-
 			if len(gradient.BaseColor) > 0 {
 				baseColor = gradient.BaseColor[0]
 			}

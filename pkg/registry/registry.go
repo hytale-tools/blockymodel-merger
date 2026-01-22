@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -76,17 +77,32 @@ var fieldToRegistry = map[string]string{
 
 // Load reads all registry files from the data directory
 // If basePath is empty, uses default "data" and "assets" directories
+// Optional dataDirName and assetsDirName allow custom directory names (defaults: "data", "assets")
 func Load(basePath ...string) (*Registry, error) {
-	var base string
+	var base, dataDirName, assetsDirName string
 	if len(basePath) > 0 {
 		base = basePath[0]
 	}
-	dataDir := defaultDataDir
-	assetsDir := defaultAssetsDir
+	if len(basePath) > 1 {
+		dataDirName = basePath[1]
+	}
+	if len(basePath) > 2 {
+		assetsDirName = basePath[2]
+	}
+	
+	if dataDirName == "" {
+		dataDirName = defaultDataDir
+	}
+	if assetsDirName == "" {
+		assetsDirName = defaultAssetsDir
+	}
+	
+	dataDir := dataDirName
+	assetsDir := assetsDirName
 	
 	if base != "" {
-		dataDir = filepath.Join(base, defaultDataDir)
-		assetsDir = filepath.Join(base, defaultAssetsDir)
+		dataDir = filepath.Join(base, dataDirName)
+		assetsDir = filepath.Join(base, assetsDirName)
 	}
 	
 	r := &Registry{
@@ -173,9 +189,13 @@ func (r *Registry) LookupWithVariant(fieldType, id, variant string) (string, err
 		return "", fmt.Errorf("accessory '%s' has no model path (variant: %s)", id, variant)
 	}
 
-	// Return path relative to base directory (e.g., "assets/Cosmetics/...")
-	// The caller will join this with their base directory
-	return filepath.Join(defaultAssetsDir, modelPath), nil
+	// Return path relative to base directory (e.g., "{assetsDir}/Cosmetics/...")
+	// Use the actual assetsDir from registry (which may be custom)
+	assetsDirName := filepath.Base(r.assetsDir)
+	if assetsDirName == "" {
+		assetsDirName = defaultAssetsDir
+	}
+	return filepath.Join(assetsDirName, modelPath), nil
 }
 
 // Lookup finds an accessory by field type and ID (no variant)
@@ -216,21 +236,36 @@ func (r *Registry) ResolveTexture(fieldType, id, color, variant string) (*Resolv
 		GradientSet: entry.GradientSet,
 	}
 
+	// Get the actual assets directory name (may be custom)
+	assetsDirName := filepath.Base(r.assetsDir)
+	if assetsDirName == "" {
+		assetsDirName = defaultAssetsDir
+	}
+
 	// First check variant-level textures if variant is specified
 	if variant != "" && entry.Variants != nil {
 		if variantEntry, ok := entry.Variants[variant]; ok {
 			// Check for variant's Textures map (pre-colored)
 			if color != "" && variantEntry.Textures != nil {
 				if texEntry, ok := variantEntry.Textures[color]; ok {
-					// Prepend assets/ to texture path
-					result.DirectTexture = filepath.Join(defaultAssetsDir, texEntry.Texture)
+					// Ensure path starts with assets directory name (JSON paths are relative to assets directory)
+					texturePath := texEntry.Texture
+					if !strings.HasPrefix(texturePath, assetsDirName+"/") && !strings.HasPrefix(texturePath, assetsDirName+string(filepath.Separator)) {
+						texturePath = filepath.Join(assetsDirName, texturePath)
+					}
+					result.DirectTexture = texturePath
 					result.BaseColor = texEntry.BaseColor
 					return result, nil
 				}
 			}
 			// Check for variant's greyscale texture
 			if variantEntry.GreyscaleTexture != "" {
-				result.GreyscaleTexture = filepath.Join(defaultAssetsDir, variantEntry.GreyscaleTexture)
+				// Ensure path starts with assets directory name (JSON paths are relative to assets directory)
+				texturePath := variantEntry.GreyscaleTexture
+				if !strings.HasPrefix(texturePath, assetsDirName+"/") && !strings.HasPrefix(texturePath, assetsDirName+string(filepath.Separator)) {
+					texturePath = filepath.Join(assetsDirName, texturePath)
+				}
+				result.GreyscaleTexture = texturePath
 				return result, nil
 			}
 		}
@@ -239,8 +274,14 @@ func (r *Registry) ResolveTexture(fieldType, id, color, variant string) (*Resolv
 	// Check top-level Textures map (pre-colored)
 	if color != "" && entry.Textures != nil {
 		if texEntry, ok := entry.Textures[color]; ok {
-			// Prepend assets/ to texture path
-			result.DirectTexture = filepath.Join(defaultAssetsDir, texEntry.Texture)
+			// Ensure path starts with assets directory name (JSON paths are relative to assets directory)
+			texturePath := texEntry.Texture
+
+			if !strings.HasPrefix(texturePath, assetsDirName+"/") && !strings.HasPrefix(texturePath, assetsDirName+string(filepath.Separator)) {
+				texturePath = filepath.Join(assetsDirName, texturePath)
+			}
+
+			result.DirectTexture = texturePath
 			result.BaseColor = texEntry.BaseColor
 			return result, nil
 		}
@@ -248,7 +289,12 @@ func (r *Registry) ResolveTexture(fieldType, id, color, variant string) (*Resolv
 
 	// Fall back to top-level greyscale texture
 	if entry.GreyscaleTexture != "" {
-		result.GreyscaleTexture = filepath.Join(defaultAssetsDir, entry.GreyscaleTexture)
+		// Ensure path starts with assets directory name (JSON paths are relative to assets directory)
+		texturePath := entry.GreyscaleTexture
+		if !strings.HasPrefix(texturePath, assetsDirName+"/") && !strings.HasPrefix(texturePath, assetsDirName+string(filepath.Separator)) {
+			texturePath = filepath.Join(assetsDirName, texturePath)
+		}
+		result.GreyscaleTexture = texturePath
 		return result, nil
 	}
 
