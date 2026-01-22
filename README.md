@@ -1,6 +1,6 @@
 # BlockyModel Merger
 
-A tool for merging blockymodel files and exporting them as GLB (glTF Binary) format. Takes a base player model and merges accessories (clothing, hair, face features, etc.) based on a character configuration file.
+A tool for merging blockymodel files and exporting them as GLB (glTF Binary) format or blockymodel (Blockbench Hytale Format). Takes a base player model and merges accessories (clothing, hair, face features, etc.) based on a character configuration file.
 
 If you find this useful, consider using code `jack` in the Hytale Store
 
