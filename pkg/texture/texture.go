@@ -38,19 +38,36 @@ type GradientSets struct {
 
 // LoadGradientSets loads gradient sets from data/GradientSets.json
 // If basePath is empty, uses default "data" and "assets" directories
+// Optional dataDirName and assetsDirName allow custom directory names (defaults: "data", "assets")
 func LoadGradientSets(basePath ...string) (*GradientSets, error) {
-	var base string
+	var base, dataDirName, assetsDirName string
 
 	if len(basePath) > 0 {
 		base = basePath[0]
 	}
 
-	dataDir := defaultDataDir
-	assetsDir := defaultAssetsDir
+	if len(basePath) > 1 {
+		dataDirName = basePath[1]
+	}
+
+	if len(basePath) > 2 {
+		assetsDirName = basePath[2]
+	}
+	
+	if dataDirName == "" {
+		dataDirName = defaultDataDir
+	}
+
+	if assetsDirName == "" {
+		assetsDirName = defaultAssetsDir
+	}
+
+	dataDir := dataDirName
+	assetsDir := assetsDirName
 	
 	if base != "" {
-		dataDir = filepath.Join(base, defaultDataDir)
-		assetsDir = filepath.Join(base, defaultAssetsDir)
+		dataDir = filepath.Join(base, dataDirName)
+		assetsDir = filepath.Join(base, assetsDirName)
 	}
 	
 	path := filepath.Join(dataDir, "GradientSets.json")
@@ -257,7 +274,7 @@ func ApplyGradientTint(greyscale image.Image, gradientPath string, baseColor str
 // ApplyGradientTintWithSet applies gradient tint using the blockymodel algorithm:
 // - Greyscale pixels (R==G==B): apply gradient lookup
 // - Colored pixels (R≠G or G≠B): keep original color unchanged
-// baseAssetsPath is optional - if provided, used as base for loading gradient images
+// baseAssetsPath is optional - if provided, should be the full path to the assets directory
 func ApplyGradientTintWithSet(greyscale image.Image, gradientPath string, baseColor string, gradientSet string, baseAssetsPath ...string) (image.Image, error) {
 	bounds := greyscale.Bounds()
 	result := image.NewRGBA(bounds)
@@ -353,16 +370,21 @@ func ProcessAccessoryTexture(
 	colorName string,
 	gradientSets *GradientSets,
 ) (*TintedTexture, error) {
-	// Get base path from gradientSets if available
+	// Get base path and assets directory name from gradientSets if available
 	var basePath string
+	var assetsDirName string
 	if gradientSets != nil {
-		// Extract base path from assetsDir (remove "assets" suffix)
+		// Extract base path from assetsDir (remove assets directory name suffix)
 		assetsDir := gradientSets.assetsDir
-		if filepath.Base(assetsDir) == defaultAssetsDir {
-			basePath = filepath.Dir(assetsDir)
-		} else {
-			basePath = assetsDir
+		assetsDirName = filepath.Base(assetsDir)
+
+		if assetsDirName == "" {
+			assetsDirName = defaultAssetsDir
 		}
+
+		basePath = filepath.Dir(assetsDir)
+	} else {
+		assetsDirName = defaultAssetsDir
 	}
 	
 	// Load greyscale texture
@@ -378,7 +400,9 @@ func ProcessAccessoryTexture(
 		if err != nil {
 			fmt.Printf("    Warning: %v, using default\n", err)
 		} else {
-			gradientPath = gradient.Texture
+			// Prepend assets/ to gradient path (gradient paths from JSON are relative to assets)
+			gradientPath = filepath.Join(assetsDirName, gradient.Texture)
+
 			if len(gradient.BaseColor) > 0 {
 				baseColor = gradient.BaseColor[0]
 			}
@@ -388,7 +412,7 @@ func ProcessAccessoryTexture(
 		fmt.Printf("    → No gradient (set=%q, color=%q)\n", gradientSet, colorName)
 	}
 
-	// Apply tinting (pass gradient set name to determine blend mode and base path)
+	// Apply tinting (pass basePath - LoadImage will handle the assets/ prefix in gradientPath)
 	tinted, err := ApplyGradientTintWithSet(greyscale, gradientPath, baseColor, gradientSet, basePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to apply tint to %s: %w", name, err)
