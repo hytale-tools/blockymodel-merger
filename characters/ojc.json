@@ -1,0 +1,20 @@
+{
+  "bodyCharacteristic": "Muscular.05",
+  "underwear": "Suit.Blue",
+  "face": "Face_Stubble",
+  "ears": "Default",
+  "mouth": "Mouth_Default",
+  "haircut": "MediumCurly.BrownSemiLight",
+  "facialHair": "DoubleBraid.BrownSemiLight",
+  "eyebrows": "Serious.BrownSemiLight",
+  "eyes": "Large_Eyes.BrownDark",
+  "pants": "DesertDress.Brown",
+  "overpants": "LongSocks_Bow.Pink",
+  "undertop": "LongSleevePeasantTop.Black",
+  "shoes": "LeatherBoots.Black",
+  "headAccessory": "Hoodie_Ornated.PitchBlack",
+  "faceAccessory": "MouthWheat.Green",
+  "earAccessory": "SimpleEarring.Gold_Red.Right",
+  "gloves": "FlowerBracer.Gold_Red",
+  "cape": "Hope_Of_Gaia_Cape.Gold_Red.Neck_Piece"
+}

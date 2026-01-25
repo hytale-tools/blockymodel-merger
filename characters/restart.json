@@ -1,0 +1,22 @@
+{
+  "bodyCharacteristic": "Default.12",
+  "underwear": "Suit.Blue",
+  "face": "Face_MakeUp_Freckles",
+  "ears": "Default",
+  "mouth": "Mouth_Default",
+  "haircut": "GenericMedium.PinkBerry",
+  "facialHair": null,
+  "eyebrows": "Large.PinkBerry",
+  "eyes": "Almond_Eyes.Honey",
+  "pants": "Leggings.Black",
+  "overpants": null,
+  "undertop": "Undertops_Tubetop.Black",
+  "overtop": "Tunic_Villager.Turquoise",
+  "shoes": "Boots_Long.BrownDark",
+  "headAccessory": null,
+  "faceAccessory": null,
+  "earAccessory": null,
+  "skinFeature": null,
+  "gloves": "GoldenBracelets.Gold_Red",
+  "cape": null
+}
