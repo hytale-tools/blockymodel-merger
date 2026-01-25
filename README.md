@@ -1,6 +1,6 @@
 # BlockyModel Merger
 
-A tool for merging blockymodel files and exporting them as GLB (glTF Binary) format. Takes a base player model and merges accessories (clothing, hair, face features, etc.) based on a character configuration file.
+A tool for merging blockymodel files and exporting them as GLB (glTF Binary) format or blockymodel (Hytale's Blockbench Format). Takes a base player model and merges accessories (clothing, hair, face features, etc.) based on a character configuration file.
 
 If you find this useful, consider using code `jack` in the Hytale Store
 
@@ -171,6 +171,21 @@ Format: `"AccessoryId.Color.Variant"` where Color and Variant are optional.
   "gloves": "LongGloves_Savanna.Black",
   "cape": "Cape_Wasteland_Marauder.BlueDark.NoNeck"
 }
+```
+
+**Accessing cached character skin data:**
+
+If you have the game installed, you can access character skins you've created from the game's installation directory:
+
+1. Open the Hytale launcher
+2. Click the settings cog (⚙️)
+3. Click "Open Directory"
+4. Navigate to the `UserData` folder
+5. Open the `CachedPlayerSkins` folder
+
+You can copy character JSON files from this folder and use them directly with the tool:
+```bash
+./blockymerge -char /path/to/CachedPlayerSkins/your-character.json -out output-name
 ```
 
 ### Available Slots
