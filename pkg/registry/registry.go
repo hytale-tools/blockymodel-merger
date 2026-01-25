@@ -37,6 +37,13 @@ type AccessoryEntry struct {
 	GradientSet      string                  `json:"GradientSet"`
 	Variants         map[string]VariantEntry `json:"Variants"`
 	Textures         map[string]TextureEntry `json:"Textures"` // For pre-colored textures at top level
+	
+	// HeadAccessory-specific fields
+	HeadAccessoryType string `json:"HeadAccessoryType,omitempty"` // "Simple", "HalfCovering", "FullyCovering"
+	
+	// Haircut-specific fields
+	HairType               string `json:"HairType,omitempty"`            // e.g., "Short", "Medium", "Long"
+	RequiresGenericHaircut bool   `json:"RequiresGenericHaircut,omitempty"` // If true, use Generic{HairType} when HalfCovering
 }
 
 // ResolvedTexture contains the resolved texture info for an accessory

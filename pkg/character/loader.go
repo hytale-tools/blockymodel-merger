@@ -113,7 +113,59 @@ func (c *CharacterData) ResolveAccessories(reg *registry.Registry) (*ResolveResu
 	addAccessory("eyebrows", c.Eyebrows)
 	addAccessory("mouth", c.Mouth)
 	addAccessory("facialHair", c.FacialHair)
-	addAccessory("haircut", c.Haircut)
+	
+	// Check headAccessory type before adding haircut
+	headAccessoryEntry := (*registry.AccessoryEntry)(nil)
+	if c.HeadAccessory != nil && *c.HeadAccessory != "" {
+		spec := ParseAccessorySpec(*c.HeadAccessory)
+		entry, _ := reg.GetEntry("headAccessory", spec.ID)
+		headAccessoryEntry = entry
+	}
+	
+	// Handle haircut based on headAccessory type
+	// FullyCovering: skip haircut (it's hidden under the head accessory)
+	if headAccessoryEntry == nil || headAccessoryEntry.HeadAccessoryType != "FullyCovering" {
+		if headAccessoryEntry != nil && headAccessoryEntry.HeadAccessoryType == "HalfCovering" && c.Haircut != nil && *c.Haircut != "" {
+			// HalfCovering: check if haircut requires generic
+			haircutSpec := ParseAccessorySpec(*c.Haircut)
+			haircutEntry, _ := reg.GetEntry("haircut", haircutSpec.ID)
+			if haircutEntry != nil && haircutEntry.RequiresGenericHaircut && haircutEntry.HairType != "" {
+				// Use generic haircut instead
+				genericID := "Generic" + haircutEntry.HairType
+				genericSpec := AccessorySpec{
+					ID:      genericID,
+					Color:   haircutSpec.Color,
+					Variant: haircutSpec.Variant,
+				}
+				// Try to resolve generic haircut
+				path, err := reg.LookupWithVariant("haircut", genericID, genericSpec.Variant)
+				if err == nil {
+					if _, err := os.Stat(path); err == nil {
+						entry, _ := reg.GetEntry("haircut", genericID)
+						colorForTexture := genericSpec.Color
+						if colorForTexture == "" && entry != nil && entry.GradientSet == "Skin" && skinTone != "" {
+							colorForTexture = skinTone
+						}
+						resolvedTex, _ := reg.ResolveTexture("haircut", genericID, colorForTexture, genericSpec.Variant)
+						genericSpec.Color = colorForTexture
+						result.Accessories = append(result.Accessories, AccessoryPath{
+							Type:            "haircut",
+							Spec:            genericSpec,
+							Path:            path,
+							Entry:           entry,
+							ResolvedTexture: resolvedTex,
+						})
+					}
+				}
+			} else {
+				// Use normal haircut
+				addAccessory("haircut", c.Haircut)
+			}
+		} else {
+			// Normal case: add haircut as usual
+			addAccessory("haircut", c.Haircut)
+		}
+	}
 
 	// Clothing (bottom to top layering)
 	addAccessory("underwear", c.Underwear)
