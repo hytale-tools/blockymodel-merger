@@ -63,6 +63,9 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) 
 		}
 
 		// Copy non-skeleton children (geometry) to the base node
+		// When IsPiece is true, recursively attach children to the matching base node.
+		// The IsPiece node itself is NOT added - only its children are attached.
+		// Children are cloned as-is with their positions unchanged.
 		for i := range accessoryNode.Children {
 			child := &accessoryNode.Children[i]
 			if !child.IsSkeletonReference() && !m.isAttachmentPoint(child) {
@@ -71,6 +74,8 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) 
 				if err != nil {
 					return fmt.Errorf("failed to clone node %s: %w", child.Name, err)
 				}
+				// Filter out skeleton ref nodes from cloned children - they should only be attachment points
+				cloned.Children = m.filterSkeletonRefs(cloned.Children, accessoryID)
 				m.reIDNode(cloned, accessoryID)
 				baseNode.Children = append(baseNode.Children, *cloned)
 			} else {
@@ -89,6 +94,42 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) 
 		}
 	}
 	return nil
+}
+
+// filterSkeletonRefs removes skeleton reference nodes from children and processes their children instead
+func (m *Merger) filterSkeletonRefs(children []blockymodel.Node, accessoryID string) []blockymodel.Node {
+	var filtered []blockymodel.Node
+	for i := range children {
+		child := &children[i]
+		if child.IsSkeletonReference() || m.isAttachmentPoint(child) {
+			// This is a skeleton ref - process its children but don't add the ref itself
+			baseNode := findNodeByName(m.base.Nodes, child.Name)
+			if baseNode != nil {
+				// Recursively process skeleton ref's children and attach them to base
+				for j := range child.Children {
+					grandchild := &child.Children[j]
+					if !grandchild.IsSkeletonReference() && !m.isAttachmentPoint(grandchild) {
+						cloned, err := blockymodel.CloneNode(grandchild)
+						if err == nil {
+							cloned.Children = m.filterSkeletonRefs(cloned.Children, accessoryID)
+							m.reIDNode(cloned, accessoryID)
+							baseNode.Children = append(baseNode.Children, *cloned)
+						}
+					} else {
+						// Recurse into nested skeleton refs
+						m.mergeNode(grandchild, accessoryID)
+					}
+				}
+			}
+			// Don't add the skeleton ref node itself
+		} else {
+			// Not a skeleton ref - add it but filter its children too
+			cloned := *child
+			cloned.Children = m.filterSkeletonRefs(child.Children, accessoryID)
+			filtered = append(filtered, cloned)
+		}
+	}
+	return filtered
 }
 
 // isAttachmentPoint checks if a node is an attachment point (bone reference)
