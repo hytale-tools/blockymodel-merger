@@ -4,6 +4,8 @@ A tool for merging blockymodel files and exporting them as GLB (glTF Binary) for
 
 If you find this useful, consider using code `jack` in the Hytale Store
 
+Try it online or use the API: https://hytl.skin/
+
 > **Note:** This project is provided as-is. No support or assistance will be provided. Please refer to the documentation and troubleshooting section for help.
 
 ## Features
