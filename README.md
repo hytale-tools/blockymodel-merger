@@ -16,6 +16,22 @@ Try it online or use the API: https://hytl.skin/
 - Export to blockymodel format
 - Automatic texture atlas generation
 
+## Downloads
+
+Pre-built binaries are available for Windows, Linux, and macOS (Intel & Apple Silicon):
+
+- **[Latest Release](https://github.com/hytale-tools/blockymodel-merger/releases/latest)** - Download the latest version
+- **[All Releases](https://github.com/hytale-tools/blockymodel-merger/releases)** - Browse all releases
+
+Each release includes:
+- `blockymerge` / `blockymerge.exe` - Main merger tool
+- `extract-assets` / `extract-assets.exe` - Assets extraction utility
+
+**Quick Start:**
+1. Download the archive for your platform from the [latest release](https://github.com/hytale-tools/blockymodel-merger/releases/latest)
+2. Extract the archive
+3. Follow the [Setup](#setup) instructions below to configure assets
+
 ## Setup
 
 ### Prerequisites
@@ -25,10 +41,20 @@ Try it online or use the API: https://hytl.skin/
 
 ### Getting Started
 
-1. **Clone the repository:**
+1. **Download the tools:**
+   
+   You can either download pre-built binaries from the [releases page](https://github.com/hytale-tools/blockymodel-merger/releases/latest) or build from source:
+   
+   **Option A: Use pre-built binaries (recommended)**
+   - Download the archive for your platform from the [latest release](https://github.com/hytale-tools/blockymodel-merger/releases/latest)
+   - Extract the archive and make the binaries executable (on Linux/macOS: `chmod +x blockymerge extract-assets`)
+   
+   **Option B: Build from source**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/hytale-tools/blockymodel-merger.git
    cd blockymodel-merger
+   go build -o blockymerge ./cmd/blockymerge
+   go build -o extract-assets ./cmd/extract-assets
    ```
 
 2. **Set up the `assets/` directory:**
@@ -46,8 +72,9 @@ Try it online or use the API: https://hytl.skin/
    
    2. Use the extraction utility:
       ```bash
-      # Build the extractor
-      go build -o extract-assets ./cmd/extract-assets
+      # If you downloaded pre-built binaries, extract-assets should already be available
+      # If you built from source, you may need to build it first:
+      # go build -o extract-assets ./cmd/extract-assets
       
       # Extract required folders from assets.zip
       ./extract-assets /path/to/assets.zip
@@ -92,9 +119,12 @@ Try it online or use the API: https://hytl.skin/
    ls data/GradientSets.json
    ```
 
-5. **Build the tool:**
+5. **Verify the tools are available:**
    ```bash
-   go build -o blockymerge ./cmd/blockymerge
+   # If you downloaded pre-built binaries, they should be in your current directory
+   # If you built from source, they should be in the project root
+   ./blockymerge -h  # Should show help text
+   ./extract-assets -h  # Should show help text (if available)
    ```
 
 6. **Test with a character file:**
