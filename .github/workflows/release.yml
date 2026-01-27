@@ -87,37 +87,51 @@ jobs:
         run: |
           mkdir -p release
           
+          # Debug: Show artifact structure
+          echo "=== Artifact structure ==="
+          find artifacts -type f -o -type d | head -20
+          
           for extract_dir in artifacts/extract-assets-*/; do
             if [ -d "$extract_dir" ]; then
               full_name=$(basename "$extract_dir")
               platform=$(echo "$full_name" | sed 's/^extract-assets-//' | sed 's/\.exe$//')
               
+              echo "=== Processing platform: $platform ==="
               mkdir -p "release-temp/$platform"
               
-              # Copy all files from extract-assets directory (try with and without .exe)
-              for artifact_dir in "artifacts/extract-assets-$platform.exe" "artifacts/extract-assets-$platform"; do
-                if [ -d "$artifact_dir" ]; then
-                  cp "$artifact_dir"* "release-temp/$platform/" 2>/dev/null || true
+              # Copy all files from extract-assets directory
+              echo "Extract dir: $extract_dir"
+              ls -la "$extract_dir" || true
+              find "$extract_dir" -type f -exec cp {} "release-temp/$platform/" \;
+              
+              # Copy all files from blockymerge directory
+              for blocky_pattern in "artifacts/blockymerge-$platform.exe" "artifacts/blockymerge-$platform"; do
+                if [ -d "$blocky_pattern" ]; then
+                  echo "Blocky dir: $blocky_pattern"
+                  ls -la "$blocky_pattern" || true
+                  find "$blocky_pattern" -type f -exec cp {} "release-temp/$platform/" \;
                   break
                 fi
               done
               
-              # Copy all files from blockymerge directory (try with and without .exe)
-              for artifact_dir in "artifacts/blockymerge-$platform.exe" "artifacts/blockymerge-$platform"; do
-                if [ -d "$artifact_dir" ]; then
-                  cp "$artifact_dir"* "release-temp/$platform/" 2>/dev/null || true
-                  break
-                fi
-              done
+              echo "Files in release-temp/$platform:"
+              ls -la "release-temp/$platform/" || true
               
-              # Create archive
-              if [[ "$platform" == *"windows"* ]]; then
-                (cd "release-temp/$platform" && zip -r "../../release/blockymodel-merger-$platform.zip" .)
+              # Create archive only if files exist
+              if [ "$(ls -A release-temp/$platform)" ]; then
+                if [[ "$platform" == *"windows"* ]]; then
+                  (cd "release-temp/$platform" && zip -r "../../release/blockymodel-merger-$platform.zip" .)
+                else
+                  (cd "release-temp/$platform" && tar -czf "../../release/blockymodel-merger-$platform.tar.gz" .)
+                fi
               else
-                (cd "release-temp/$platform" && tar -czf "../../release/blockymodel-merger-$platform.tar.gz" .)
+                echo "ERROR: No files found for platform $platform"
               fi
             fi
           done
+          
+          echo "=== Created archives ==="
+          ls -lh release/
           
           rm -rf release-temp
 
