@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ""
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: ".exe"
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ""
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build extract-assets
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -o extract-assets${{ matrix.ext }} ./cmd/extract-assets
+
+      - name: Build blockymerge
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -o blockymerge${{ matrix.ext }} ./cmd/blockymerge
+
+      - name: Upload extract-assets artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extract-assets-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: extract-assets${{ matrix.ext }}
+          retention-days: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && 90 || 30 }}
+
+      - name: Upload blockymerge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blockymerge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: blockymerge${{ matrix.ext }}
+          retention-days: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && 90 || 30 }}
+
+  release:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release archives
+        run: |
+          mkdir -p release
+          
+          # Group artifacts by platform
+          for extract_dir in artifacts/extract-assets-*/; do
+            if [ -d "$extract_dir" ]; then
+              platform=$(basename "$extract_dir" | sed 's/extract-assets-//')
+              mkdir -p "release-temp/$platform"
+              
+              # Copy extract-assets
+              cp "$extract_dir"/* "release-temp/$platform/" 2>/dev/null || true
+              
+              # Copy blockymerge from matching platform
+              blocky_dir="artifacts/blockymerge-$platform"
+              if [ -d "$blocky_dir" ]; then
+                cp "$blocky_dir"/* "release-temp/$platform/" 2>/dev/null || true
+              fi
+              
+              # Create archive
+              if [[ "$platform" == *"windows"* ]]; then
+                cd "release-temp/$platform"
+                zip -r "../../release/blockymodel-merger-$platform.zip" .
+                cd ../..
+              else
+                cd "release-temp/$platform"
+                tar -czf "../../release/blockymodel-merger-$platform.tar.gz" .
+                cd ../..
+              fi
+            fi
+          done
+          
+          rm -rf release-temp
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
