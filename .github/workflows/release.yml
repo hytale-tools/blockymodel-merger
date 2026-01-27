@@ -87,25 +87,25 @@ jobs:
         run: |
           mkdir -p release
           
-          # Process each extract-assets artifact
           for extract_dir in artifacts/extract-assets-*/; do
             if [ -d "$extract_dir" ]; then
-              # Extract platform from directory name
-              # e.g., extract-assets-linux-amd64/ -> linux-amd64
-              # e.g., extract-assets-windows-amd64.exe/ -> windows-amd64
               full_name=$(basename "$extract_dir")
               platform=$(echo "$full_name" | sed 's/^extract-assets-//' | sed 's/\.exe$//')
               
               mkdir -p "release-temp/$platform"
               
-              # Copy all files from extract-assets directory
-              find "$extract_dir" -type f -exec cp {} "release-temp/$platform/" \;
+              # Copy all files from extract-assets directory (try with and without .exe)
+              for artifact_dir in "artifacts/extract-assets-$platform.exe" "artifacts/extract-assets-$platform"; do
+                if [ -d "$artifact_dir" ]; then
+                  cp "$artifact_dir"* "release-temp/$platform/" 2>/dev/null || true
+                  break
+                fi
+              done
               
-              # Copy all files from matching blockymerge directory
-              # Try with .exe first (for Windows), then without
-              for blocky_pattern in "artifacts/blockymerge-$platform.exe" "artifacts/blockymerge-$platform"; do
-                if [ -d "$blocky_pattern" ]; then
-                  find "$blocky_pattern" -type f -exec cp {} "release-temp/$platform/" \;
+              # Copy all files from blockymerge directory (try with and without .exe)
+              for artifact_dir in "artifacts/blockymerge-$platform.exe" "artifacts/blockymerge-$platform"; do
+                if [ -d "$artifact_dir" ]; then
+                  cp "$artifact_dir"* "release-temp/$platform/" 2>/dev/null || true
                   break
                 fi
               done
