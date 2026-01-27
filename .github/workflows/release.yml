@@ -87,17 +87,35 @@ jobs:
         run: |
           mkdir -p release
           
+          # Process each extract-assets artifact
           for extract_dir in artifacts/extract-assets-*/; do
-            platform=$(basename "$extract_dir" | sed 's/^extract-assets-//')
-            mkdir -p "release-temp/$platform"
-            
-            cp "$extract_dir"* "release-temp/$platform/" 2>/dev/null
-            cp "artifacts/blockymerge-$platform"/* "release-temp/$platform/" 2>/dev/null
-            
-            if [[ "$platform" == *"windows"* ]]; then
-              (cd "release-temp/$platform" && zip -r "../../release/blockymodel-merger-$platform.zip" .)
-            else
-              (cd "release-temp/$platform" && tar -czf "../../release/blockymodel-merger-$platform.tar.gz" .)
+            if [ -d "$extract_dir" ]; then
+              # Extract platform from directory name
+              # e.g., extract-assets-linux-amd64/ -> linux-amd64
+              # e.g., extract-assets-windows-amd64.exe/ -> windows-amd64
+              full_name=$(basename "$extract_dir")
+              platform=$(echo "$full_name" | sed 's/^extract-assets-//' | sed 's/\.exe$//')
+              
+              mkdir -p "release-temp/$platform"
+              
+              # Copy all files from extract-assets directory
+              find "$extract_dir" -type f -exec cp {} "release-temp/$platform/" \;
+              
+              # Copy all files from matching blockymerge directory
+              # Try with .exe first (for Windows), then without
+              for blocky_pattern in "artifacts/blockymerge-$platform.exe" "artifacts/blockymerge-$platform"; do
+                if [ -d "$blocky_pattern" ]; then
+                  find "$blocky_pattern" -type f -exec cp {} "release-temp/$platform/" \;
+                  break
+                fi
+              done
+              
+              # Create archive
+              if [[ "$platform" == *"windows"* ]]; then
+                (cd "release-temp/$platform" && zip -r "../../release/blockymodel-merger-$platform.zip" .)
+              else
+                (cd "release-temp/$platform" && tar -czf "../../release/blockymodel-merger-$platform.tar.gz" .)
+              fi
             fi
           done
           
