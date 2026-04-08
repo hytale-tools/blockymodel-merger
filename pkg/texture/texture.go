@@ -159,17 +159,19 @@ func SaveImage(img image.Image, path string) error {
 	}
 	defer f.Close()
 
-	if err := png.Encode(f, img); err != nil {
+	enc := &png.Encoder{CompressionLevel: png.BestSpeed}
+	if err := enc.Encode(f, img); err != nil {
 		return fmt.Errorf("failed to encode PNG: %w", err)
 	}
 
 	return nil
 }
 
-// EncodePNG encodes an image to PNG bytes
+// EncodePNG encodes an image to PNG bytes with no compression (optimized for GLB embedding)
 func EncodePNG(img image.Image) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
+	enc := &png.Encoder{CompressionLevel: png.NoCompression}
+	if err := enc.Encode(&buf, img); err != nil {
 		return nil, fmt.Errorf("failed to encode PNG: %w", err)
 	}
 	return buf.Bytes(), nil
@@ -196,81 +198,6 @@ func ParseHexColor(hex string) (r, g, b uint8, err error) {
 	}
 
 	return uint8(rVal), uint8(gVal), uint8(bVal), nil
-}
-
-// isGreyscaleImage checks if an image should use direct gradient replacement
-// Returns true for textures without pre-baked colors AND without pure white/black that needs preserving
-// Returns false for:
-//   - Textures with significant color (like beige gloves)
-//   - Textures with high contrast (pure white/black) that should be preserved
-func isGreyscaleImage(img image.Image) bool {
-	bounds := img.Bounds()
-	const colorTolerance = 25 // Detect STRONG color differences
-
-	coloredPixels := 0
-	pureWhitePixels := 0
-	pureBlackPixels := 0
-	totalPixels := 0
-
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			c := img.At(x, y)
-			r, g, b, a := c.RGBA()
-			if a == 0 {
-				continue // Skip fully transparent pixels
-			}
-			r8, g8, b8 := r>>8, g>>8, b>>8
-			totalPixels++
-
-			// Check for very light (> 200) or very dark (< 50)
-			lum := (r8 + g8 + b8) / 3
-			if lum > 200 {
-				pureWhitePixels++
-			} else if lum < 50 {
-				pureBlackPixels++
-			}
-
-			// Check if R, G, B are approximately equal
-			maxDiff := max(max(absDiff(r8, g8), absDiff(g8, b8)), absDiff(r8, b8))
-			if maxDiff > colorTolerance {
-				coloredPixels++
-			}
-		}
-	}
-
-	if totalPixels == 0 {
-		return true
-	}
-
-	// If texture has significant pre-baked colors, use soft light
-	colorRatio := float64(coloredPixels) / float64(totalPixels)
-	if colorRatio >= 0.40 {
-		return false
-	}
-
-	// If texture has BOTH pure white AND pure black (high contrast pattern like stripes)
-	// use soft light to preserve the white/black
-	whiteRatio := float64(pureWhitePixels) / float64(totalPixels)
-	blackRatio := float64(pureBlackPixels) / float64(totalPixels)
-	if whiteRatio > 0.05 && blackRatio > 0.05 {
-		return false // High contrast pattern - preserve white/black
-	}
-
-	return true
-}
-
-func absDiff(a, b uint32) uint32 {
-	if a > b {
-		return a - b
-	}
-	return b - a
-}
-
-func max(a, b uint32) uint32 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // ApplyGradientTint applies a gradient tint to a greyscale image
@@ -317,52 +244,80 @@ func ApplyGradientTintWithSet(greyscale image.Image, gradientPath string, baseCo
 		}
 	}
 
+	// Try direct pixel access for performance
+	srcRGBA, srcIsRGBA := greyscale.(*image.RGBA)
+	srcNRGBA, srcIsNRGBA := greyscale.(*image.NRGBA)
+
+	// Pre-compute gradient lookup table if gradient is available
+	var gradLUT [256][3]uint8
+	if gradient != nil {
+		gradBounds := gradient.Bounds()
+		gradW := gradBounds.Max.X - 1
+		if gradRGBA, ok := gradient.(*image.RGBA); ok {
+			for i := 0; i < 256; i++ {
+				gradX := i * gradW / 255
+				gi := gradRGBA.PixOffset(gradX+gradBounds.Min.X, gradBounds.Min.Y)
+				gradLUT[i] = [3]uint8{gradRGBA.Pix[gi], gradRGBA.Pix[gi+1], gradRGBA.Pix[gi+2]}
+			}
+		} else if gradNRGBA, ok := gradient.(*image.NRGBA); ok {
+			for i := 0; i < 256; i++ {
+				gradX := i * gradW / 255
+				gi := gradNRGBA.PixOffset(gradX+gradBounds.Min.X, gradBounds.Min.Y)
+				gradLUT[i] = [3]uint8{gradNRGBA.Pix[gi], gradNRGBA.Pix[gi+1], gradNRGBA.Pix[gi+2]}
+			}
+		} else {
+			for i := 0; i < 256; i++ {
+				gradX := i * gradW / 255
+				c := gradient.At(gradX+gradBounds.Min.X, gradBounds.Min.Y)
+				rr, gg, bb, _ := c.RGBA()
+				gradLUT[i] = [3]uint8{uint8(rr >> 8), uint8(gg >> 8), uint8(bb >> 8)}
+			}
+		}
+	}
+
+	stride := result.Stride
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		// Read source pixels directly from Pix slice
+		var srcR, srcG, srcB, srcA uint8
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			origColor := greyscale.At(x, y)
-			origRGBA := color.RGBAModel.Convert(origColor).(color.RGBA)
-
-			var r, g, b uint8
-
-			// Blockymodel gradient tinting algorithm:
-			// Greyscale pixels (R==G==B): apply gradient lookup
-			// Colored pixels (R≠G or G≠B): keep original pixel unchanged
-			isGreyscale := origRGBA.R == origRGBA.G && origRGBA.G == origRGBA.B
-
-			if gradient != nil && isGreyscale {
-				// Greyscale pixel: use gradient lookup
-				// The red channel value (0-255) maps to X position in gradient
-				gradBounds := gradient.Bounds()
-				gradX := int(float64(origRGBA.R) / 255.0 * float64(gradBounds.Max.X-1))
-				if gradX >= gradBounds.Max.X {
-					gradX = gradBounds.Max.X - 1
-				}
-				if gradX < 0 {
-					gradX = 0
-				}
-				gradColor := gradient.At(gradX, gradBounds.Min.Y)
-				rr, gg, bb, _ := gradColor.RGBA()
-				r, g, b = uint8(rr>>8), uint8(gg>>8), uint8(bb>>8)
-			} else if !isGreyscale {
-				// Colored pixel: keep original color unchanged
-				r, g, b = origRGBA.R, origRGBA.G, origRGBA.B
+			if srcIsRGBA {
+				si := srcRGBA.PixOffset(x, y)
+				srcR, srcG, srcB, srcA = srcRGBA.Pix[si], srcRGBA.Pix[si+1], srcRGBA.Pix[si+2], srcRGBA.Pix[si+3]
+			} else if srcIsNRGBA {
+				si := srcNRGBA.PixOffset(x, y)
+				srcR, srcG, srcB, srcA = srcNRGBA.Pix[si], srcNRGBA.Pix[si+1], srcNRGBA.Pix[si+2], srcNRGBA.Pix[si+3]
 			} else {
-				// No gradient available, use base color tint
-				grey := origRGBA.R // For greyscale, R=G=B
-				r = uint8(float64(grey) * float64(baseR) / 255.0)
-				g = uint8(float64(grey) * float64(baseG) / 255.0)
-				b = uint8(float64(grey) * float64(baseB) / 255.0)
+				c := greyscale.At(x, y)
+				rgba := color.RGBAModel.Convert(c).(color.RGBA)
+				srcR, srcG, srcB, srcA = rgba.R, rgba.G, rgba.B, rgba.A
 			}
 
-			// Threshold alpha to avoid semi-transparent edge artifacts
-		// Alpha >= 128 becomes fully opaque, alpha < 128 becomes fully transparent
-		a := origRGBA.A
-		if a >= 128 {
-			a = 255
-		} else {
-			a = 0
-		}
-		result.Set(x, y, color.RGBA{R: r, G: g, B: b, A: a})
+			var r, g, b uint8
+			isGrey := srcR == srcG && srcG == srcB
+
+			if gradient != nil && isGrey {
+				lut := gradLUT[srcR]
+				r, g, b = lut[0], lut[1], lut[2]
+			} else if !isGrey {
+				r, g, b = srcR, srcG, srcB
+			} else {
+				r = uint8(uint16(srcR) * uint16(baseR) / 255)
+				g = uint8(uint16(srcR) * uint16(baseG) / 255)
+				b = uint8(uint16(srcR) * uint16(baseB) / 255)
+			}
+
+			// Threshold alpha
+			a := uint8(0)
+			if srcA >= 128 {
+				a = 255
+			}
+
+			// Write directly to result Pix slice
+			di := (y-bounds.Min.Y)*stride + (x-bounds.Min.X)*4
+			result.Pix[di] = r
+			result.Pix[di+1] = g
+			result.Pix[di+2] = b
+			result.Pix[di+3] = a
 		}
 	}
 
