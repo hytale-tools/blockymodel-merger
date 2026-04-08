@@ -286,10 +286,11 @@ func (e *GLBExporter) createBoxMesh(node *blockymodel.Node, materialIdx uint32, 
 	flipY := stretchY < 0
 	flipZ := stretchZ < 0
 
-	var positions [][3]float32
-	var normals [][3]float32
-	var uvs [][2]float32
-	var indices []uint16
+	// Pre-allocate: max 6 faces × 4 verts = 24 verts, 6 faces × 6 indices = 36
+	positions := make([][3]float32, 0, 24)
+	normals := make([][3]float32, 0, 24)
+	uvs := make([][2]float32, 0, 24)
+	indices := make([]uint16, 0, 36)
 
 	// Blockbench face order: east, west, up, down, south, north
 	// This maps to: X+, X-, Y+, Y-, Z+, Z-
@@ -697,11 +698,11 @@ func (e *GLBExporter) createQuadMesh(node *blockymodel.Node, materialIdx uint32,
 		}
 	}
 
-	var normalsArr [][3]float32
-	var uvsArr [][2]float32
+	normalsArr := make([][3]float32, 4)
+	uvsArr := make([][2]float32, 4)
 	for i := 0; i < 4; i++ {
-		normalsArr = append(normalsArr, flippedNormal)
-		uvsArr = append(uvsArr, uvs[i])
+		normalsArr[i] = flippedNormal
+		uvsArr[i] = uvs[i]
 	}
 
 	// Triangle indices - reverse winding if odd number of flips
