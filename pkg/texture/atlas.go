@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	"math"
 	"sort"
 )
 
@@ -54,94 +55,18 @@ func PackAtlas(textures []*TintedTexture, padding int) (*Atlas, error) {
 		}
 	}
 
-	// Try different aspect ratios to find the most compact atlas
-	// Start with a square-ish size based on area, then try different widths
-	sideLen := int(float64(totalArea)*1.2) / maxTexHeight
-	if sideLen < maxTexWidth {
-		sideLen = maxTexWidth
+	// Single-pass: use sqrt(totalArea) as width, clamped to maxTexWidth
+	width := int(math.Sqrt(float64(totalArea) * 1.2))
+	if width < maxTexWidth {
+		width = maxTexWidth
 	}
-
-	// Try widths from minimum needed up to wider options
-	bestAtlas := (*Atlas)(nil)
-	bestArea := int(^uint(0) >> 1) // max int
-
-	// Try different widths: start narrow, go wider
-	for width := maxTexWidth; width <= sideLen*4; width += maxTexWidth / 2 {
-		if width < maxTexWidth {
-			width = maxTexWidth
-		}
-		// Try with a tall enough height
-		maxHeight := totalArea/width + maxTexHeight*len(sorted)
-		atlas := tryPackTight(sorted, width, maxHeight, padding)
-		if atlas != nil {
-			area := atlas.Width * atlas.Height
-			if area < bestArea {
-				bestArea = area
-				bestAtlas = atlas
-			}
-		}
-	}
-
-	if bestAtlas == nil {
+	maxHeight := totalArea/width + maxTexHeight*len(sorted)
+	atlas := tryPackTight(sorted, width, maxHeight, padding)
+	if atlas == nil {
 		return nil, fmt.Errorf("failed to pack textures into atlas")
 	}
 
-	return bestAtlas, nil
-}
-
-func tryPack(textures []*TintedTexture, width, height, padding int) *Atlas {
-	atlas := &Atlas{
-		Image:   image.NewRGBA(image.Rect(0, 0, width, height)),
-		Entries: make(map[string]*AtlasEntry),
-		Width:   width,
-		Height:  height,
-	}
-
-	// Shelf packing: place textures in rows
-	shelfY := 0
-	shelfHeight := 0
-	currentX := 0
-
-	for _, tex := range textures {
-		bounds := tex.Image.Bounds()
-		texW, texH := bounds.Dx(), bounds.Dy()
-
-		// Check if texture fits on current shelf
-		if currentX+texW+padding > width {
-			// Move to next shelf
-			shelfY += shelfHeight + padding
-			shelfHeight = 0
-			currentX = 0
-		}
-
-		// Check if we've run out of vertical space
-		if shelfY+texH+padding > height {
-			return nil // Doesn't fit
-		}
-
-		// Place texture
-		entry := &AtlasEntry{
-			Name:   tex.Name,
-			Image:  tex.Image,
-			X:      currentX,
-			Y:      shelfY,
-			Width:  texW,
-			Height: texH,
-		}
-		atlas.Entries[tex.Name] = entry
-
-		// Draw texture onto atlas
-		destRect := image.Rect(currentX, shelfY, currentX+texW, shelfY+texH)
-		draw.Draw(atlas.Image, destRect, tex.Image, bounds.Min, draw.Over)
-
-		// Update shelf tracking
-		currentX += texW + padding
-		if texH > shelfHeight {
-			shelfHeight = texH
-		}
-	}
-
-	return atlas
+	return atlas, nil
 }
 
 // tryPackTight packs textures and crops to actual content bounds
@@ -354,32 +279,13 @@ func PackAtlasWithBase(textures []*TintedTexture, padding int) (*Atlas, error) {
 		return remaining[i].Image.Bounds().Dy() > remaining[j].Image.Bounds().Dy()
 	})
 
-	// Try different widths to find optimal packing
-	// Start with base width, try up to 2x base width
-	bestAtlas := (*Atlas)(nil)
-	bestArea := int(^uint(0) >> 1)
-
-	for targetWidth := baseW; targetWidth <= baseW*2; targetWidth += baseW / 4 {
-		atlas := tryPackWithBase(baseTex, remaining, targetWidth, padding)
-		if atlas != nil {
-			area := atlas.Width * atlas.Height
-			if area < bestArea {
-				bestArea = area
-				bestAtlas = atlas
-			}
-		}
-	}
-
-	if bestAtlas == nil {
-		// Fallback: use wider atlas
-		bestAtlas = tryPackWithBase(baseTex, remaining, baseW*4, padding)
-	}
-
-	if bestAtlas == nil {
+	// Single-pass with base width
+	atlas := tryPackWithBase(baseTex, remaining, baseW, padding)
+	if atlas == nil {
 		return nil, fmt.Errorf("failed to pack textures into atlas")
 	}
 
-	return bestAtlas, nil
+	return atlas, nil
 }
 
 func tryPackWithBase(baseTex *TintedTexture, remaining []*TintedTexture, targetWidth, padding int) *Atlas {
