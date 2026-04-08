@@ -10,8 +10,9 @@ import (
 
 // Merger handles merging accessories into a base model
 type Merger struct {
-	base   *blockymodel.BlockyModel
-	nextID int
+	base      *blockymodel.BlockyModel
+	nextID    int
+	nodeIndex map[string]*blockymodel.Node // name -> node for O(1) lookups
 	// Track which accessory each merged node ID came from
 	NodeSources map[string]string // node ID -> accessory ID
 }
@@ -26,11 +27,33 @@ func New(base *blockymodel.BlockyModel) (*Merger, error) {
 	// Find the highest existing ID to use for new nodes
 	maxID := findMaxID(cloned.Nodes)
 
-	return &Merger{
+	m := &Merger{
 		base:        cloned,
 		nextID:      maxID + 1,
+		nodeIndex:   make(map[string]*blockymodel.Node),
 		NodeSources: make(map[string]string),
-	}, nil
+	}
+	m.buildNodeIndex(cloned.Nodes)
+	return m, nil
+}
+
+// buildNodeIndex walks the node tree and indexes nodes by name
+func (m *Merger) buildNodeIndex(nodes []blockymodel.Node) {
+	for i := range nodes {
+		m.nodeIndex[nodes[i].Name] = &nodes[i]
+		m.buildNodeIndex(nodes[i].Children)
+	}
+}
+
+// reindexChildren refreshes index pointers for all children of a node.
+// Must be called after appending to node.Children, since append may
+// reallocate the slice and invalidate pointers to existing siblings.
+func (m *Merger) reindexChildren(node *blockymodel.Node) {
+	for i := range node.Children {
+		child := &node.Children[i]
+		m.nodeIndex[child.Name] = child
+		m.reindexChildren(child)
+	}
 }
 
 // Merge integrates an accessory into the base model
@@ -52,7 +75,7 @@ func (m *Merger) Result() *blockymodel.BlockyModel {
 // mergeNode processes a single accessory node
 func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) error {
 	// Check if this node matches a bone in the base model (either skeleton ref or by name)
-	baseNode := findNodeByName(m.base.Nodes, accessoryNode.Name)
+	baseNode := m.nodeIndex[accessoryNode.Name]
 
 	if accessoryNode.IsSkeletonReference() || (baseNode != nil && accessoryNode.Shape != nil && accessoryNode.Shape.Type == "none") {
 		// This is an attachment point - attach children to base model
@@ -78,6 +101,9 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) 
 				cloned.Children = m.filterSkeletonRefs(cloned.Children, accessoryID)
 				m.reIDNode(cloned, accessoryID)
 				baseNode.Children = append(baseNode.Children, *cloned)
+				// Re-index all children - append may have reallocated the slice,
+				// invalidating pointers to existing siblings
+				m.reindexChildren(baseNode)
 			} else {
 				// Recurse into skeleton reference children
 				if err := m.mergeNode(child, accessoryID); err != nil {
@@ -103,7 +129,7 @@ func (m *Merger) filterSkeletonRefs(children []blockymodel.Node, accessoryID str
 		child := &children[i]
 		if child.IsSkeletonReference() || m.isAttachmentPoint(child) {
 			// This is a skeleton ref - process its children but don't add the ref itself
-			baseNode := findNodeByName(m.base.Nodes, child.Name)
+			baseNode := m.nodeIndex[child.Name]
 			if baseNode != nil {
 				// Recursively process skeleton ref's children and attach them to base
 				for j := range child.Children {
@@ -114,6 +140,7 @@ func (m *Merger) filterSkeletonRefs(children []blockymodel.Node, accessoryID str
 							cloned.Children = m.filterSkeletonRefs(cloned.Children, accessoryID)
 							m.reIDNode(cloned, accessoryID)
 							baseNode.Children = append(baseNode.Children, *cloned)
+							m.reindexChildren(baseNode)
 						}
 					} else {
 						// Recurse into nested skeleton refs
@@ -139,8 +166,8 @@ func (m *Merger) isAttachmentPoint(node *blockymodel.Node) bool {
 	}
 	// Also check if it matches a bone name and has no geometry
 	if node.Shape != nil && node.Shape.Type == "none" {
-		baseNode := findNodeByName(m.base.Nodes, node.Name)
-		return baseNode != nil
+		_, exists := m.nodeIndex[node.Name]
+		return exists
 	}
 	return false
 }
@@ -153,19 +180,6 @@ func (m *Merger) reIDNode(node *blockymodel.Node, accessoryID string) {
 	for i := range node.Children {
 		m.reIDNode(&node.Children[i], accessoryID)
 	}
-}
-
-// findNodeByName recursively searches for a node with the given name
-func findNodeByName(nodes []blockymodel.Node, name string) *blockymodel.Node {
-	for i := range nodes {
-		if nodes[i].Name == name {
-			return &nodes[i]
-		}
-		if found := findNodeByName(nodes[i].Children, name); found != nil {
-			return found
-		}
-	}
-	return nil
 }
 
 // findMaxID recursively finds the maximum numeric ID in the node tree
