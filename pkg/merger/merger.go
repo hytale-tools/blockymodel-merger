@@ -164,10 +164,14 @@ func (m *Merger) isAttachmentPoint(node *blockymodel.Node) bool {
 	if node.IsSkeletonReference() {
 		return true
 	}
-	// Also check if it matches a bone name and has no geometry
+	// Also check if it matches a bone name and has no geometry.
+	// The matching base node must also be a non-geometry node (type "none") to avoid
+	// false matches against geometry nodes that happen to share the same name.
 	if node.Shape != nil && node.Shape.Type == "none" {
-		_, exists := m.nodeIndex[node.Name]
-		return exists
+		baseNode := m.nodeIndex[node.Name]
+		if baseNode != nil && baseNode.Shape != nil && baseNode.Shape.Type == "none" {
+			return true
+		}
 	}
 	return false
 }
