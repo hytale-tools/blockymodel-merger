@@ -7,6 +7,11 @@ on:
         description: 'Tag name for the release (e.g., v1.0.0)'
         required: true
         type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -166,5 +171,6 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           files: release/*
           generate_release_notes: true
+          prerelease: ${{ github.event.inputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
