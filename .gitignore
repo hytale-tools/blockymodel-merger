@@ -7,6 +7,7 @@ node_modules/
 # Go binaries
 blockymerge
 extract-assets
+item-to-glb
 *.exe
 *.exe~
 *.dll

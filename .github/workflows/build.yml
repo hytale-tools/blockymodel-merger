@@ -53,6 +53,13 @@ jobs:
         run: |
           go build -o blockymerge${{ matrix.ext }} ./cmd/blockymerge
 
+      - name: Build item-to-glb
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -o item-to-glb${{ matrix.ext }} ./cmd/item-to-glb
+
       - name: Upload extract-assets artifact
         uses: actions/upload-artifact@v4
         with:
@@ -65,4 +72,11 @@ jobs:
         with:
           name: blockymerge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           path: blockymerge${{ matrix.ext }}
+          retention-days: 30
+
+      - name: Upload item-to-glb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: item-to-glb-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: item-to-glb${{ matrix.ext }}
           retention-days: 30

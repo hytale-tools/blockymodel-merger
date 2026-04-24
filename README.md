@@ -15,6 +15,7 @@ Try it online or use the API: https://hytl.skin/
 - Export to GLB format (compatible with Blockbench and 3D viewers)
 - Export to blockymodel format
 - Automatic texture atlas generation
+- Convert individual item blockymodels (weapons, armor, tools, etc.) to GLB via `item-to-glb`
 
 ## Downloads
 
@@ -26,6 +27,7 @@ Pre-built binaries are available for Windows, Linux, and macOS (Intel & Apple Si
 Each release includes:
 - `blockymerge` / `blockymerge.exe` - Main merger tool
 - `extract-assets` / `extract-assets.exe` - Assets extraction utility
+- `item-to-glb` / `item-to-glb.exe` - Single-item blockymodel → GLB converter
 
 **Quick Start:**
 1. Download the archive for your platform from the [latest release](https://github.com/hytale-tools/blockymodel-merger/releases/latest)
@@ -55,6 +57,7 @@ Each release includes:
    cd blockymodel-merger
    go build -o blockymerge ./cmd/blockymerge
    go build -o extract-assets ./cmd/extract-assets
+   go build -o item-to-glb ./cmd/item-to-glb
    ```
 
 2. **Set up the `assets/` directory:**
@@ -143,6 +146,8 @@ Each release includes:
 
 ```bash
 go build -o blockymerge ./cmd/blockymerge
+go build -o extract-assets ./cmd/extract-assets
+go build -o item-to-glb ./cmd/item-to-glb
 ```
 
 ## Usage
@@ -172,6 +177,31 @@ go build -o blockymerge ./cmd/blockymerge
 
 # Export without tinting
 ./blockymerge -char my-character.json -out player -no-tint
+```
+
+## Converting individual items to GLB
+
+```bash
+./item-to-glb assets/Items/Weapons/Dagger/Bronze.blockymodel
+./item-to-glb -model <path.blockymodel> -texture <path.png> -out <path.glb>
+```
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-model`   | (required - or pass as positional arg) | Path to the item `.blockymodel` |
+| `-texture` | `<model-basename>_Texture.png` (sibling file) | Path to the texture PNG |
+| `-out`     | `output/<basename>.glb` | Output GLB path |
+| `-verbose` | `false` | Print info messages |
+
+Override `-texture` for variants that reuse another model's texture, e.g.
+`Adamantite_Triple.blockymodel` uses `Adamantite_Texture.png`:
+
+```bash
+./item-to-glb \
+  -model assets/Items/Weapons/Bow/Adamantite_Triple.blockymodel \
+  -texture assets/Items/Weapons/Bow/Adamantite_Texture.png
 ```
 
 ## Character Configuration
@@ -260,8 +290,10 @@ blockymodel-merger/
 ├── cmd/
 │   ├── blockymerge/
 │   │   └── main.go          # CLI entry point
-│   └── extract-assets/
-│       └── main.go          # Assets extraction utility
+│   ├── extract-assets/
+│   │   └── main.go          # Assets extraction utility
+│   └── item-to-glb/
+│       └── main.go          # Single-item blockymodel → GLB converter
 ├── pkg/
 │   ├── blockymodel/         # BlockyModel parsing
 │   ├── character/           # Character data loading
