@@ -53,6 +53,13 @@ jobs:
         run: |
           go build -o blockymerge${{ matrix.ext }} ./cmd/blockymerge
 
+      - name: Build blockyrender
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -o blockyrender${{ matrix.ext }} ./cmd/blockyrender
+
       - name: Build item-to-glb
         env:
           GOOS: ${{ matrix.goos }}
@@ -72,6 +79,13 @@ jobs:
         with:
           name: blockymerge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           path: blockymerge${{ matrix.ext }}
+          retention-days: 30
+
+      - name: Upload blockyrender artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blockyrender-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: blockyrender${{ matrix.ext }}
           retention-days: 30
 
       - name: Upload item-to-glb artifact

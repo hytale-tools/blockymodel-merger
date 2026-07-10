@@ -54,6 +54,13 @@ jobs:
         run: |
           go build -o blockymerge${{ matrix.ext }} ./cmd/blockymerge
 
+      - name: Build blockyrender
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -o blockyrender${{ matrix.ext }} ./cmd/blockyrender
+
       - name: Build item-to-glb
         env:
           GOOS: ${{ matrix.goos }}
@@ -73,6 +80,13 @@ jobs:
         with:
           name: blockymerge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           path: blockymerge${{ matrix.ext }}
+          retention-days: 90
+
+      - name: Upload blockyrender artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blockyrender-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: blockyrender${{ matrix.ext }}
           retention-days: 90
 
       - name: Upload item-to-glb artifact
@@ -115,6 +129,14 @@ jobs:
               for blocky_pattern in "artifacts/blockymerge-$platform.exe" "artifacts/blockymerge-$platform"; do
                 if [ -d "$blocky_pattern" ]; then
                   find "$blocky_pattern" -type f -exec cp {} "release-temp/$platform/" \;
+                  break
+                fi
+              done
+
+              # Copy all files from blockyrender directory
+              for render_pattern in "artifacts/blockyrender-$platform.exe" "artifacts/blockyrender-$platform"; do
+                if [ -d "$render_pattern" ]; then
+                  find "$render_pattern" -type f -exec cp {} "release-temp/$platform/" \;
                   break
                 fi
               done
