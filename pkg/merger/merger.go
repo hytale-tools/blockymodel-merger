@@ -14,6 +14,11 @@ type Merger struct {
 	nextID int
 	// Track which accessory each merged node ID came from
 	NodeSources map[string]string // node ID -> accessory ID
+	// Names of attachment-point-eligible nodes (shape.type=="none") in the
+	// ORIGINAL base, captured before any merging. Used to prevent accessory
+	// nodes from matching against geometry containers that were added by a
+	// previously-merged accessory.
+	baseBoneNames map[string]bool
 }
 
 // New creates a new Merger with the given base model (deep copied)
@@ -26,10 +31,14 @@ func New(base *blockymodel.BlockyModel) (*Merger, error) {
 	// Find the highest existing ID to use for new nodes
 	maxID := findMaxID(cloned.Nodes)
 
+	boneNames := make(map[string]bool)
+	collectBoneNames(cloned.Nodes, boneNames)
+
 	return &Merger{
-		base:        cloned,
-		nextID:      maxID + 1,
-		NodeSources: make(map[string]string),
+		base:          cloned,
+		nextID:        maxID + 1,
+		NodeSources:   make(map[string]string),
+		baseBoneNames: boneNames,
 	}, nil
 }
 
@@ -137,12 +146,13 @@ func (m *Merger) isAttachmentPoint(node *blockymodel.Node) bool {
 	if node.IsSkeletonReference() {
 		return true
 	}
-	// Also check if it matches a bone name and has no geometry.
-	// The matching base node must also be a non-geometry node (type "none") to avoid
-	// false matches against geometry nodes that happen to share the same name.
+	// Also check if it matches an original base bone and has no geometry.
+	// Only the ORIGINAL base bones count - m.base mutates as accessories are
+	// merged in, and a type="none" container node from an earlier accessory
+	// (e.g. Hair-Bun under Hairband_R in Magical_Pigtails) would otherwise
+	// masquerade as an attachment point for a later accessory.
 	if node.Shape != nil && node.Shape.Type == "none" {
-		baseNode := findNodeByName(m.base.Nodes, node.Name)
-		if baseNode != nil && baseNode.Shape != nil && baseNode.Shape.Type == "none" {
+		if m.baseBoneNames[node.Name] {
 			return true
 		}
 	}
@@ -170,6 +180,18 @@ func findNodeByName(nodes []blockymodel.Node, name string) *blockymodel.Node {
 		}
 	}
 	return nil
+}
+
+// collectBoneNames records the names of every node with shape.type=="none"
+// into out. Used to snapshot the original base skeleton.
+func collectBoneNames(nodes []blockymodel.Node, out map[string]bool) {
+	for i := range nodes {
+		n := &nodes[i]
+		if n.Shape != nil && n.Shape.Type == "none" {
+			out[n.Name] = true
+		}
+		collectBoneNames(n.Children, out)
+	}
 }
 
 // findMaxID recursively finds the maximum numeric ID in the node tree
