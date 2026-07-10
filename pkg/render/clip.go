@@ -120,7 +120,7 @@ func signedDistance(c Vec4, plane clipPlane) float32 {
 	case planeTop:
 		return c.W - c.Y
 	case planeNear:
-		return c.Z + c.W
+		return c.Z
 	case planeFar:
 		return c.W - c.Z
 	}
