@@ -46,6 +46,10 @@ type AccessoryPath struct {
 	ResolvedTexture *registry.ResolvedTexture // resolved texture info
 }
 
+// Key returns a tracking identifier unique across accessory types.
+// Accessory IDs alone can collide (e.g. eyebrows "Medium" vs facialHair "Medium").
+func (a AccessoryPath) Key() string { return a.Type + ":" + a.Spec.ID }
+
 // ResolveResult contains resolved accessories and any warnings
 type ResolveResult struct {
 	Accessories []AccessoryPath

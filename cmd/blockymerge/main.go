@@ -126,8 +126,9 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Use accessory spec ID as the identifier for tracking texture offsets
-		if err := m.Merge(accessory, acc.Spec.ID); err != nil {
+		// Use the type-qualified key as the identifier for tracking texture
+		// offsets - bare IDs can collide across accessory types.
+		if err := m.Merge(accessory, acc.Key()); err != nil {
 			util.Logger.Error("Error merging accessory", "path", acc.Path, "error", err)
 			os.Exit(1)
 		}
@@ -216,7 +217,7 @@ func main() {
 					continue
 				}
 				tinted = &texture.TintedTexture{
-					Name:         acc.Spec.ID,
+					Name:         acc.Key(),
 					Image:        img,
 					OriginalPath: acc.ResolvedTexture.DirectTexture,
 				}
@@ -227,7 +228,7 @@ func main() {
 					"gradientSet", acc.ResolvedTexture.GradientSet,
 					"color", acc.Spec.Color)
 				tinted, err = texture.ProcessAccessoryTexture(
-					acc.Spec.ID,
+					acc.Key(),
 					acc.ResolvedTexture.GreyscaleTexture,
 					acc.ResolvedTexture.GradientSet,
 					acc.Spec.Color,
