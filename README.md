@@ -101,7 +101,10 @@ This will extract and map:
 - `Common/Characters` → `assets/Characters/`
 - `Common/Cosmetics` → `assets/Cosmetics/`
 - `Common/TintGradients` → `assets/TintGradients/`
+- `Common/BlockTextures` → `assets/BlockTextures/` (block face textures, for `-hold-block`)
+- `Common/Blocks` → `assets/Blocks/` (custom block models, for `-hold-block`)
 - `Cosmetics/CharacterCreator` → `data/` (registry JSON files)
+- `Server/Item/Items` → `data/Items/` (item/block definitions, for `-hold-block`)
 
 The directory structure should match:
 
@@ -213,13 +216,16 @@ go build -o item-to-glb ./cmd/item-to-glb
 ### Options
 
 
-| Flag       | Default    | Description                                    |
-| ---------- | ---------- | ---------------------------------------------- |
-| `-char`    | (required) | Path to character JSON configuration file      |
-| `-out`     | `merged`   | Output file name (without extension)           |
-| `-format`  | `both`     | Output format: `glb`, `blockymodel`, or `both` |
-| `-no-tint` | `false`    | Skip texture tinting (output raw greyscale)    |
-| `-debug`   | `false`    | Print debug output showing node tree           |
+| Flag          | Default    | Description                                    |
+| ------------- | ---------- | ---------------------------------------------- |
+| `-char`       | (required) | Path to character JSON configuration file      |
+| `-out`        | `merged`   | Output file name (without extension)           |
+| `-format`     | `both`     | Output format: `glb`, `blockymodel`, or `both` |
+| `-no-tint`    | `false`    | Skip texture tinting (output raw greyscale)    |
+| `-debug`      | `false`    | Print debug output showing node tree           |
+| `-hold-block` | (none)     | Block item ID to place in the character's hand (e.g. `Soil_Grass`); applies the game's carry pose |
+| `-pose`       | (none)     | Apply frame 0 of a `.blockyanim` as a static pose |
+| `-pack`       | (none)     | External asset pack (mod) root directory; repeatable, takes priority over base assets |
 
 
 ### Examples
@@ -233,7 +239,22 @@ go build -o item-to-glb ./cmd/item-to-glb
 
 # Export without tinting
 ./blockymerge -char my-character.json -out player -no-tint
+
+# Export holding a grass block (posed with the game's block carry idle)
+./blockymerge -char my-character.json -out player -hold-block Soil_Grass
+
+# Hold a block from a mod / external asset pack (layout mirrors assets.zip)
+./blockymerge -char my-character.json -hold-block Pillow_Block_Cyan -pack path/to/pack
 ```
+
+### Holding blocks & poses
+
+`-hold-block <Id>` puts a block in the character's hand the way the game does -
+textures, model, scale, and carry pose all come from the block's own
+definition. `-pose <file.blockyanim>` applies any animation's first frame as a
+static pose, and `-pack <dir>` adds mod asset packs (assets.zip layout,
+searched before base assets). Shared by `blockymerge` and `blockyrender`;
+requires the block data extracted by extract-assets.
 
 ## Converting individual items to GLB
 
@@ -375,6 +396,8 @@ blockymodel-merger/
 │   └── item-to-glb/
 │       └── main.go          # Single-item blockymodel → GLB converter
 ├── pkg/
+│   ├── anim/                # .blockyanim loading & static pose application
+│   ├── blocks/              # Block definitions & held-block accessory building
 │   ├── blockymodel/         # BlockyModel parsing
 │   ├── character/           # Character data loading
 │   ├── export/              # GLB export
