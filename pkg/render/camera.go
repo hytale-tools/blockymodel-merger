@@ -119,6 +119,58 @@ func PerspectivePlayerBust() PerspectiveCamera {
 	return PerspectiveCamera{Position: Vec3{0, 92, 100}, Target: Vec3{0, 94, 0}, Up: defaultUp, FovYDeg: 40, Near: 1, Far: 1000}
 }
 
+// AutoFitPerspective builds a 30-degree perspective camera on the +Z axis
+// aimed at the geometry's bounding-box center, at a distance that fits the
+// largest dimension with a 1.25x margin.
+func AutoFitPerspective(faces []Face) PerspectiveCamera {
+	min := Vec3{float32(math.Inf(1)), float32(math.Inf(1)), float32(math.Inf(1))}
+	max := Vec3{float32(math.Inf(-1)), float32(math.Inf(-1)), float32(math.Inf(-1))}
+	for _, f := range faces {
+		for _, v := range f.Vertices {
+			min.X = float32(math.Min(float64(min.X), float64(v.Pos.X)))
+			min.Y = float32(math.Min(float64(min.Y), float64(v.Pos.Y)))
+			min.Z = float32(math.Min(float64(min.Z), float64(v.Pos.Z)))
+			max.X = float32(math.Max(float64(max.X), float64(v.Pos.X)))
+			max.Y = float32(math.Max(float64(max.Y), float64(v.Pos.Y)))
+			max.Z = float32(math.Max(float64(max.Z), float64(v.Pos.Z)))
+		}
+	}
+	center := Vec3{(min.X + max.X) / 2, (min.Y + max.Y) / 2, (min.Z + max.Z) / 2}
+	size := Vec3{max.X - min.X, max.Y - min.Y, max.Z - min.Z}
+	maxDim := math.Max(float64(size.X), math.Max(float64(size.Y), float64(size.Z)))
+
+	const fovY = 30.0
+	dist := float32(maxDim / (2 * math.Tan(fovY/2*math.Pi/180)) * 1.25)
+	return PerspectiveCamera{
+		Position: Vec3{center.X, center.Y, center.Z + dist},
+		Target:   center,
+		Up:       defaultUp,
+		FovYDeg:  fovY,
+		Near:     dist / 100,
+		Far:      dist * 10,
+	}
+}
+
+// RotateFacesY rotates face vertices (and normals) around the world Y axis
+// through the origin.
+func RotateFacesY(faces []Face, deg float32) {
+	if deg == 0 {
+		return
+	}
+	rad := float64(deg) * math.Pi / 180
+	sin, cos := float32(math.Sin(rad)), float32(math.Cos(rad))
+	rot := func(v Vec3) Vec3 {
+		return Vec3{v.X*cos + v.Z*sin, v.Y, -v.X*sin + v.Z*cos}
+	}
+	for i := range faces {
+		for j := range faces[i].Vertices {
+			v := &faces[i].Vertices[j]
+			v.Pos = rot(v.Pos)
+			v.Normal = rot(v.Normal)
+		}
+	}
+}
+
 // CameraForView returns a camera preset by name. ortho selects orthographic vs
 // perspective where both exist.
 func CameraForView(name string, perspective bool) (CameraProjection, bool) {

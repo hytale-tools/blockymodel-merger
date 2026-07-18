@@ -28,6 +28,7 @@ func main() {
 	modelFile := flag.String("model", "", "Path to a standalone .blockymodel (instead of -char)")
 	texFile := flag.String("texture", "", "Texture PNG for -model mode (default: white)")
 	view := flag.String("view", "full-body", "Camera preset: full-body, headshot, bust, iso-head, isometric, front-right, front-left, back-right, back-left")
+	rotation := flag.Float64("rotation", 0, "Rotate the character by this many degrees")
 	size := flag.Int("size", 512, "Output image size (square)")
 	width := flag.Int("width", 0, "Output width (overrides -size)")
 	height := flag.Int("height", 0, "Output height (overrides -size)")
@@ -52,10 +53,18 @@ func main() {
 		h = *height
 	}
 
-	camera, ok := render.CameraForView(*view, *persp)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "Unknown view %q\n", *view)
-		os.Exit(1)
+	// full-body and headshot use a perspective camera auto-fit to the geometry
+	// (full body or head), built after the geometry is loaded. Other presets
+	// keep their fixed cameras.
+	autoFit := *view == "full-body" || *view == "full-body-front" || *view == "headshot"
+	var camera render.CameraProjection
+	if !autoFit {
+		var ok bool
+		camera, ok = render.CameraForView(*view, *persp)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Unknown view %q\n", *view)
+			os.Exit(1)
+		}
 	}
 
 	cfg := render.RenderConfig{Bilinear: *bilinear, Threads: *threads}
@@ -65,6 +74,7 @@ func main() {
 
 	var faces []render.Face
 	var tex *render.Texture
+	var srcModel *blockymodel.BlockyModel
 
 	loadStart := time.Now()
 	switch {
@@ -73,6 +83,7 @@ func main() {
 		if err != nil {
 			fatal("loading model", err)
 		}
+		srcModel = model
 		faces = render.Flatten(model)
 		if *texFile != "" {
 			img, err := loadImage(*texFile)
@@ -88,6 +99,7 @@ func main() {
 		if err != nil {
 			fatal("building character", err)
 		}
+		srcModel = res.Model
 		faces = render.Flatten(res.Model)
 		if res.Atlas != nil {
 			tex = render.NewTexture(res.Atlas.Image)
@@ -99,6 +111,22 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	if autoFit {
+		// Frame before rotating (bbox of the unrotated mesh). Held items are
+		// excluded from the framing box so the character stays centered
+		// exactly as in an item-less render.
+		var bboxFaces []render.Face
+		if *view == "headshot" {
+			bboxFaces = render.FlattenSubtree(srcModel, "Head")
+		} else {
+			bboxFaces = render.FlattenExcluding(srcModel, render.HeldItemNodeName)
+		}
+		if len(bboxFaces) == 0 {
+			bboxFaces = faces
+		}
+		camera = render.AutoFitPerspective(bboxFaces)
+	}
+	render.RotateFacesY(faces, float32(-*rotation))
 	loadDur := time.Since(loadStart)
 
 	util.Logger.Info("Scene built", "faces", len(faces), "loadMs", loadDur.Milliseconds())

@@ -17,10 +17,15 @@ blockyrender -model some.blockymodel -texture some_Texture.png -view headshot -o
 ```
 
 Flags: `-view` (full-body, headshot, bust, iso-head, isometric, front-right,
-front-left, back-right, back-left), `-size`/`-width`/`-height`, `-persp`
-(perspective variant of head/bust views), `-bilinear`, `-light`, `-no-tint`,
-`-threads N` (0=auto/NumCPU, 1=single-threaded), `-bench N` (render N times,
-report avg).
+front-left, back-right, back-left), `-rotation N` (rotate the character by N
+degrees), `-size`/`-width`/`-height`, `-persp` (perspective variant of
+bust/iso-head views), `-bilinear`, `-light`, `-no-tint`, `-threads N`
+(0=auto/NumCPU, 1=single-threaded), `-bench N` (render N times, report avg).
+
+`full-body` and `headshot` use a 30-degree perspective camera auto-fit to the
+model's bounding box (full body, or the Head subtree for headshots) with a
+1.25x margin. Geometry inside a node named `HeldItem` is excluded from the
+framing box so attachments never shift the character in frame.
 
 ## How the renderer works
 
