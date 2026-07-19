@@ -7,6 +7,11 @@ on:
         description: 'Tag name for the release (e.g., v1.0.0)'
         required: true
         type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -54,6 +59,13 @@ jobs:
         run: |
           go build -o blockymerge${{ matrix.ext }} ./cmd/blockymerge
 
+      - name: Build blockyrender
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -o blockyrender${{ matrix.ext }} ./cmd/blockyrender
+
       - name: Build item-to-glb
         env:
           GOOS: ${{ matrix.goos }}
@@ -73,6 +85,13 @@ jobs:
         with:
           name: blockymerge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           path: blockymerge${{ matrix.ext }}
+          retention-days: 90
+
+      - name: Upload blockyrender artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blockyrender-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: blockyrender${{ matrix.ext }}
           retention-days: 90
 
       - name: Upload item-to-glb artifact
@@ -119,6 +138,14 @@ jobs:
                 fi
               done
 
+              # Copy all files from blockyrender directory
+              for render_pattern in "artifacts/blockyrender-$platform.exe" "artifacts/blockyrender-$platform"; do
+                if [ -d "$render_pattern" ]; then
+                  find "$render_pattern" -type f -exec cp {} "release-temp/$platform/" \;
+                  break
+                fi
+              done
+
               # Copy all files from item-to-glb directory
               for item_pattern in "artifacts/item-to-glb-$platform.exe" "artifacts/item-to-glb-$platform"; do
                 if [ -d "$item_pattern" ]; then
@@ -144,5 +171,6 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           files: release/*
           generate_release_notes: true
+          prerelease: ${{ github.event.inputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

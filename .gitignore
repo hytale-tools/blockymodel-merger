@@ -4,10 +4,11 @@ old/
 output/
 node_modules/
 
-# Go binaries
-blockymerge
-extract-assets
-item-to-glb
+# Go binaries (root only - don't match cmd/<name>/ source dirs)
+/blockymerge
+/blockyrender
+/extract-assets
+/item-to-glb
 *.exe
 *.exe~
 *.dll

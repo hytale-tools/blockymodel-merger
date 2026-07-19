@@ -16,6 +16,7 @@ import (
 type GLBExporter struct {
 	doc         *gltf.Document
 	materials   map[string]int
+	dsMaterials map[uint32]uint32 // base material index -> double-sided clone index
 	atlasWidth  float64
 	atlasHeight float64
 }
@@ -24,8 +25,9 @@ type GLBExporter struct {
 func NewGLBExporter() *GLBExporter {
 	doc := gltf.NewDocument()
 	return &GLBExporter{
-		doc:       doc,
-		materials: make(map[string]int),
+		doc:         doc,
+		materials:   make(map[string]int),
+		dsMaterials: make(map[uint32]uint32),
 	}
 }
 
@@ -79,7 +81,6 @@ func (e *GLBExporter) AddMaterial(name string, textureIdx uint32) uint32 {
 		},
 		AlphaMode:   gltf.AlphaMask,
 		AlphaCutoff: gltf.Float(0.05),
-		DoubleSided: true,
 		Extensions: gltf.Extensions{
 			"KHR_materials_unlit": map[string]interface{}{},
 		},
@@ -102,6 +103,27 @@ func (e *GLBExporter) AddMaterial(name string, textureIdx uint32) uint32 {
 
 	e.materials[name] = materialIdx
 	return uint32(materialIdx)
+}
+
+// materialFor returns the material to use for a shape: the base material for
+// single-sided shapes, or a double-sided clone of it for shapes flagged
+// doubleSided. Backface culling on everything else keeps hairline gaps
+// between adjacent boxes from exposing interior faces.
+func (e *GLBExporter) materialFor(baseIdx uint32, shape *blockymodel.Shape) uint32 {
+	if shape == nil || shape.DoubleSided == nil || !*shape.DoubleSided {
+		return baseIdx
+	}
+	if idx, ok := e.dsMaterials[baseIdx]; ok {
+		return idx
+	}
+	base := e.doc.Materials[baseIdx]
+	clone := *base
+	clone.Name = base.Name + "-doublesided"
+	clone.DoubleSided = true
+	materialIdx := uint32(len(e.doc.Materials))
+	e.doc.Materials = append(e.doc.Materials, &clone)
+	e.dsMaterials[baseIdx] = materialIdx
+	return materialIdx
 }
 
 // ExportModel exports a BlockyModel to GLB with hierarchical nodes
@@ -286,10 +308,11 @@ func (e *GLBExporter) createBoxMesh(node *blockymodel.Node, materialIdx uint32, 
 	flipY := stretchY < 0
 	flipZ := stretchZ < 0
 
-	var positions [][3]float32
-	var normals [][3]float32
-	var uvs [][2]float32
-	var indices []uint16
+	// Pre-allocate: max 6 faces × 4 verts = 24 verts, 6 faces × 6 indices = 36
+	positions := make([][3]float32, 0, 24)
+	normals := make([][3]float32, 0, 24)
+	uvs := make([][2]float32, 0, 24)
+	indices := make([]uint16, 0, 36)
 
 	// Blockbench face order: east, west, up, down, south, north
 	// This maps to: X+, X-, Y+, Y-, Z+, Z-
@@ -420,7 +443,7 @@ func (e *GLBExporter) createBoxMesh(node *blockymodel.Node, materialIdx uint32, 
 		return -1
 	}
 
-	return e.createGLTFMesh(node.Name, positions, normals, uvs, indices, materialIdx)
+	return e.createGLTFMesh(node.Name, positions, normals, uvs, indices, e.materialFor(materialIdx, node.Shape))
 }
 
 // calculateUVs converts blockymodel textureLayout to GLB UV coordinates
@@ -491,9 +514,13 @@ func (e *GLBExporter) calculateUVs(layout blockymodel.TextureFace, uvWidth, uvHe
 	u1 := faceUV[2] / e.atlasWidth
 	v1 := faceUV[3] / e.atlasHeight
 	
-	// Apply half-pixel inset to prevent texture bleeding at edges
-	insetU := 0.5 / e.atlasWidth
-	insetV := 0.5 / e.atlasHeight
+	// Nudge UVs inward by 1/8 px so MSAA edge fragments, which standard glTF
+	// viewers interpolate at the pixel center (possibly outside the triangle),
+	// don't extrapolate into neighbouring atlas texels. Blockbench hides the
+	// same artifact with centroid-sampling shaders, which glTF cannot express.
+	// 1/8 px keeps texel density visually intact, unlike a half-pixel inset.
+	insetU := (1.0 / 8.0) / e.atlasWidth
+	insetV := (1.0 / 8.0) / e.atlasHeight
 	if u0 < u1 {
 		u0 += insetU
 		u1 -= insetU
@@ -508,7 +535,7 @@ func (e *GLBExporter) calculateUVs(layout blockymodel.TextureFace, uvWidth, uvHe
 		v0 -= insetV
 		v1 += insetV
 	}
-	
+
 	// getUVArray creates: TL=(u0, 1-v0), TR=(u1, 1-v0), BL=(u0, 1-v1), BR=(u1, 1-v1)
 	arr := [4][2]float32{
 		{float32(u0), float32(1 - v0)}, // TL
@@ -697,11 +724,11 @@ func (e *GLBExporter) createQuadMesh(node *blockymodel.Node, materialIdx uint32,
 		}
 	}
 
-	var normalsArr [][3]float32
-	var uvsArr [][2]float32
+	normalsArr := make([][3]float32, 4)
+	uvsArr := make([][2]float32, 4)
 	for i := 0; i < 4; i++ {
-		normalsArr = append(normalsArr, flippedNormal)
-		uvsArr = append(uvsArr, uvs[i])
+		normalsArr[i] = flippedNormal
+		uvsArr[i] = uvs[i]
 	}
 
 	// Triangle indices - reverse winding if odd number of flips
@@ -718,7 +745,7 @@ func (e *GLBExporter) createQuadMesh(node *blockymodel.Node, materialIdx uint32,
 	// Note: DoubleSided is handled by the material property, not by creating duplicate geometry
 	// Creating duplicate back-face geometry at the same position causes z-fighting artifacts
 
-	return e.createGLTFMesh(node.Name, positions, normalsArr, uvsArr, indices, materialIdx)
+	return e.createGLTFMesh(node.Name, positions, normalsArr, uvsArr, indices, e.materialFor(materialIdx, node.Shape))
 }
 
 // createGLTFMesh creates the actual GLTF mesh from geometry data

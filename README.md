@@ -1,8 +1,9 @@
 # BlockyModel Merger
 
-A tool for working with Hytale's blockymodel files and exporting them as GLB (glTF Binary) or blockymodel (Hytale's Blockbench Format). Ships with two CLIs:
+A tool for working with Hytale's blockymodel files and exporting them as GLB (glTF Binary) or blockymodel (Hytale's Blockbench Format). Ships with three CLIs:
 
 - `blockymerge` - builds a player model by merging accessories (clothing, hair, face features, etc.) onto the base player model, based off a character config.
+- `blockyrender` - renders a character config straight to a PNG using a built-in CPU rasterizer. No GPU or external renderer needed.
 - `item-to-glb` - converts a standalone item blockymodel (weapons, armor, tools, etc.) to GLB, using its matching `_Texture.png`.
 
 If you find this useful, consider using code `jack` in the Hytale Store
@@ -18,6 +19,7 @@ Try it online or use the API: [https://hytl.skin/](https://hytl.skin/)
 - Export to GLB format (compatible with Blockbench and 3D viewers)
 - Export to blockymodel format
 - Automatic texture atlas generation
+- Render characters directly to PNG via `blockyrender` (CPU-only, multiple camera views)
 - Convert individual item blockymodels (weapons, armor, tools, etc.) to GLB via `item-to-glb`
 
 ## Downloads
@@ -30,6 +32,7 @@ Pre-built binaries are available for Windows, Linux, and macOS (Intel & Apple Si
 Each release includes:
 
 - `blockymerge` / `blockymerge.exe` - Main merger tool
+- `blockyrender` / `blockyrender.exe` - Character → PNG renderer
 - `extract-assets` / `extract-assets.exe` - Assets extraction utility
 - `item-to-glb` / `item-to-glb.exe` - Single-item blockymodel → GLB converter
 
@@ -55,7 +58,7 @@ You can either download pre-built binaries from the [releases page](https://gith
 **Option A: Use pre-built binaries (recommended)**
 
 - Download the archive for your platform from the [latest release](https://github.com/hytale-tools/blockymodel-merger/releases/latest)
-- Extract the archive and make the binaries executable (on Linux/macOS: `chmod +x blockymerge extract-assets item-to-glb`)
+- Extract the archive and make the binaries executable (on Linux/macOS: `chmod +x blockymerge blockyrender extract-assets item-to-glb`)
 
 **Option B: Build from source**
 
@@ -63,6 +66,7 @@ You can either download pre-built binaries from the [releases page](https://gith
 git clone https://github.com/hytale-tools/blockymodel-merger.git
 cd blockymodel-merger
 go build -o blockymerge ./cmd/blockymerge
+go build -o blockyrender ./cmd/blockyrender
 go build -o extract-assets ./cmd/extract-assets
 go build -o item-to-glb ./cmd/item-to-glb
 ```
@@ -195,6 +199,7 @@ ls output/Bronze.glb
 
 ```bash
 go build -o blockymerge ./cmd/blockymerge
+go build -o blockyrender ./cmd/blockyrender
 go build -o extract-assets ./cmd/extract-assets
 go build -o item-to-glb ./cmd/item-to-glb
 ```
@@ -256,6 +261,23 @@ Override `-texture` for variants that reuse another model's texture, e.g.
   -model assets/Items/Weapons/Bow/Adamantite_Triple.blockymodel \
   -texture assets/Items/Weapons/Bow/Adamantite_Texture.png
 ```
+
+## Rendering characters to PNG
+
+`blockyrender` skips the GLB step entirely and rasterizes the merged character
+straight to an image:
+
+```bash
+# Character config (uses the same registry/assets as blockymerge)
+./blockyrender -char my-character.json -view full-body -size 512 -o out.png
+
+# Standalone blockymodel + texture (no registry/assets needed)
+./blockyrender -model some.blockymodel -texture some_Texture.png -view headshot -o out.png
+```
+
+Supports multiple camera views (full-body, headshot, bust, isometric, and more).
+See [cmd/blockyrender/README.md](cmd/blockyrender/README.md) for the full flag
+list and performance notes.
 
 ## Character Configuration
 
@@ -346,6 +368,8 @@ blockymodel-merger/
 ├── cmd/
 │   ├── blockymerge/
 │   │   └── main.go          # CLI entry point
+│   ├── blockyrender/
+│   │   └── main.go          # Character → PNG renderer
 │   ├── extract-assets/
 │   │   └── main.go          # Assets extraction utility
 │   └── item-to-glb/
@@ -355,7 +379,9 @@ blockymodel-merger/
 │   ├── character/           # Character data loading
 │   ├── export/              # GLB export
 │   ├── merger/              # Model merging logic
+│   ├── pipeline/            # Shared load + merge + tint + atlas pipeline
 │   ├── registry/            # Accessory registry
+│   ├── render/              # CPU software rasterizer
 │   └── texture/             # Texture processing & atlas
 ├── assets/                  # BlockyModel & texture assets
 ├── data/                    # Accessory registry JSON files
