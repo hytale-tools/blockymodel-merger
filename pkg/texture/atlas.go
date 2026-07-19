@@ -60,7 +60,7 @@ func PackAtlas(textures []*TintedTexture, padding int) (*Atlas, error) {
 	if width < maxTexWidth {
 		width = maxTexWidth
 	}
-	maxHeight := totalArea/width + maxTexHeight*len(sorted)
+	maxHeight := totalArea/width + (maxTexHeight+padding)*len(sorted)
 	atlas := tryPackTight(sorted, width, maxHeight, padding)
 	if atlas == nil {
 		return nil, fmt.Errorf("failed to pack textures into atlas")
