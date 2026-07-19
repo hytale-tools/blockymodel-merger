@@ -41,9 +41,15 @@ type RenderConfig struct {
 // projectedTri is a screen-space triangle with everything the fill loop needs
 // precomputed: positions+depth, face-local UVs, the UV-layout constants, an
 // optional lighting LUT, and a vertical bounding box for band skipping.
+//
+// Depth and UVs are stored premultiplied by iw (1/clipW) so the fill loop can
+// interpolate them perspective-correct: screen-space linear interpolation is
+// only exact for attributes divided by w. Under an orthographic camera w is 1
+// and the arithmetic reduces to the plain affine path.
 type projectedTri struct {
-	x, y, z [3]float32
-	u, v    [3]float32
+	x, y   [3]float32
+	zi, iw [3]float32 // depth*iw and iw (iw = 1/clipW)
+	u, v   [3]float32 // face-local UVs premultiplied by iw
 
 	// Precomputed UV-layout constants (see transformUVCoords):
 	// texU = ox + faceU*muU, texV = oy + faceV*muV, then rotation by angle.
@@ -61,9 +67,9 @@ func fillTri(img *image.RGBA, depth []float32, width, height int, yStart, yEnd i
 		return
 	}
 
-	x0, y0, z0 := t.x[0], t.y[0], t.z[0]
-	x1, y1, z1 := t.x[1], t.y[1], t.z[1]
-	x2, y2, z2 := t.x[2], t.y[2], t.z[2]
+	x0, y0, zi0, iw0 := t.x[0], t.y[0], t.zi[0], t.iw[0]
+	x1, y1, zi1, iw1 := t.x[1], t.y[1], t.zi[1], t.iw[1]
+	x2, y2, zi2, iw2 := t.x[2], t.y[2], t.zi[2], t.iw[2]
 
 	area := (x1-x0)*(y2-y0) - (x2-x0)*(y1-y0)
 	if area < 1e-7 && area > -1e-7 {
@@ -96,6 +102,10 @@ func fillTri(img *image.RGBA, depth []float32, width, height int, yStart, yEnd i
 	angle := t.angle
 	lut := t.lut
 
+	// Orthographic triangles (w == 1 everywhere) take the exact affine path;
+	// perspective triangles interpolate premultiplied attributes and divide.
+	ortho := iw0 == 1 && iw1 == 1 && iw2 == 1
+
 	pxStart := float32(minX) + 0.5
 	for y := minY; y <= maxY; y++ {
 		py := float32(y) + 0.5
@@ -111,11 +121,28 @@ func fillTri(img *image.RGBA, depth []float32, width, height int, yStart, yEnd i
 		for x := minX; x <= maxX; x++ {
 			if w0 >= 0 && w1 >= 0 && w2 >= 0 {
 				idx := rowOff + x
-				d := w0*z0 + w1*z1 + w2*z2
-				if d < depth[idx]-depthBias {
-					faceU := w0*u0 + w1*u1 + w2*u2
-					faceV := w0*v0 + w1*v1 + w2*v2
-
+				var pass bool
+				var d, faceU, faceV float32
+				if ortho {
+					d = w0*zi0 + w1*zi1 + w2*zi2
+					if pass = d < depth[idx]-depthBias; pass {
+						faceU = w0*u0 + w1*u1 + w2*u2
+						faceV = w0*v0 + w1*v1 + w2*v2
+					}
+				} else {
+					// Perspective-correct: depth d = ziP/iwP. Cross-multiplied
+					// depth test keeps the reject path divide-free; iwP > 0
+					// since vertices are near-clipped.
+					ziP := w0*zi0 + w1*zi1 + w2*zi2
+					iwP := w0*iw0 + w1*iw1 + w2*iw2
+					if pass = ziP < (depth[idx]-depthBias)*iwP; pass {
+						invW := 1.0 / iwP
+						d = ziP * invW
+						faceU = (w0*u0 + w1*u1 + w2*u2) * invW
+						faceV = (w0*v0 + w1*v1 + w2*v2) * invW
+					}
+				}
+				if pass {
 					var r, g, b, a uint8
 					if bilinear {
 						r, g, b, a = sampleLayoutBilinear(tex, ox, oy, muU, muV, angle, faceU, faceV)

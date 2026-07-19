@@ -87,18 +87,22 @@ func projectFaces(faces []Face, camera CameraProjection, width, height int, cfg 
 			continue
 		}
 
-		// Project clipped vertices to screen space.
+		// Project clipped vertices to screen space. Depth and UVs are
+		// premultiplied by 1/w for perspective-correct interpolation in the
+		// fill loop (w is 1 under orthographic cameras).
 		n := len(clipped)
 		sx := make([]float32, n)
 		sy := make([]float32, n)
-		sz := make([]float32, n)
+		szi := make([]float32, n)
+		siw := make([]float32, n)
 		for i, cv := range clipped {
 			invW := 1.0 / cv.clipPos.W
 			ndcX := cv.clipPos.X * invW
 			ndcY := cv.clipPos.Y * invW
 			sx[i] = (ndcX + 1) * 0.5 * fw
 			sy[i] = (1 - ndcY) * 0.5 * fh
-			sz[i] = camera.CalculateDepth(cv.worldPos)
+			szi[i] = camera.CalculateDepth(cv.worldPos) * invW
+			siw[i] = invW
 		}
 
 		if n < 3 {
@@ -142,9 +146,10 @@ func projectFaces(faces []Face, camera CameraProjection, width, height int, cfg 
 			t := projectedTri{
 				x:     [3]float32{sx[a], sx[b], sx[c]},
 				y:     [3]float32{sy[a], sy[b], sy[c]},
-				z:     [3]float32{sz[a], sz[b], sz[c]},
-				u:     [3]float32{clipped[a].u, clipped[b].u, clipped[c].u},
-				v:     [3]float32{clipped[a].v, clipped[b].v, clipped[c].v},
+				zi:    [3]float32{szi[a], szi[b], szi[c]},
+				iw:    [3]float32{siw[a], siw[b], siw[c]},
+				u:     [3]float32{clipped[a].u * siw[a], clipped[b].u * siw[b], clipped[c].u * siw[c]},
+				v:     [3]float32{clipped[a].v * siw[a], clipped[b].v * siw[b], clipped[c].v * siw[c]},
 				ox:    ox,
 				oy:    oy,
 				muU:   muU,
