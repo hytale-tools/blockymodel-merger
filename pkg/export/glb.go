@@ -2,6 +2,8 @@ package export
 
 import (
 	"bytes"
+	"image"
+	"image/png"
 	"strings"
 
 	"github.com/hytale-tools/blockymodel-merger/pkg/blockymodel"
@@ -19,6 +21,7 @@ type GLBExporter struct {
 	dsMaterials map[uint32]uint32 // base material index -> double-sided clone index
 	atlasWidth  float64
 	atlasHeight float64
+	atlasImage  image.Image // decoded atlas, for per-face alpha inspection
 }
 
 // NewGLBExporter creates a new GLB exporter
@@ -39,6 +42,10 @@ func (e *GLBExporter) SetAtlasSize(width, height float64) {
 
 // AddTexture adds a texture from PNG data
 func (e *GLBExporter) AddTexture(imageData []byte) uint32 {
+	// Keep a decoded copy so material sidedness can inspect per-face alpha.
+	if img, err := png.Decode(bytes.NewReader(imageData)); err == nil {
+		e.atlasImage = img
+	}
 	imgIdx := uint32(len(e.doc.Images))
 	e.doc.Images = append(e.doc.Images, &gltf.Image{
 		MimeType:   "image/png",
@@ -106,16 +113,98 @@ func (e *GLBExporter) AddMaterial(name string, textureIdx uint32) uint32 {
 }
 
 // materialFor returns the material to use for a shape: the base material for
-// single-sided shapes, or a double-sided clone of it for shapes flagged
-// doubleSided. Backface culling on everything else keeps hairline gaps
-// between adjacent boxes from exposing interior faces.
+// fully closed opaque boxes, or a double-sided clone for shapes whose
+// backfaces can legitimately show. Blockbench renders everything double-sided;
+// culling closed opaque boxes is a safe deviation that keeps hairline gaps
+// between adjacent pieces from exposing bright interior faces in multisampled
+// viewers.
 func (e *GLBExporter) materialFor(baseIdx uint32, shape *blockymodel.Shape) uint32 {
-	if shape == nil || shape.DoubleSided == nil || !*shape.DoubleSided {
+	if shape == nil || !e.shapeNeedsDoubleSided(shape) {
 		return baseIdx
 	}
 	if idx, ok := e.dsMaterials[baseIdx]; ok {
 		return idx
 	}
+	return e.doubleSidedClone(baseIdx)
+}
+
+// shapeNeedsDoubleSided reports whether a shape's backfaces must render:
+// explicitly flagged shapes, quads (flat, visible from both sides), open
+// boxes (fewer than six textured faces), and boxes with transparent texels in
+// a face (cutouts expose the interior).
+func (e *GLBExporter) shapeNeedsDoubleSided(shape *blockymodel.Shape) bool {
+	if shape.DoubleSided != nil && *shape.DoubleSided {
+		return true
+	}
+	if shape.Type != "box" {
+		return true
+	}
+	if len(shape.TextureLayout) < 6 {
+		return true
+	}
+	return e.boxHasTransparentTexels(shape)
+}
+
+// boxHasTransparentTexels scans each textured face's atlas rect for alpha
+// below the mask cutoff.
+func (e *GLBExporter) boxHasTransparentTexels(shape *blockymodel.Shape) bool {
+	if e.atlasImage == nil {
+		return false
+	}
+	sizeX, sizeY, sizeZ := 1.0, 1.0, 1.0
+	if shape.Settings != nil {
+		if size, ok := shape.Settings["size"].(map[string]interface{}); ok {
+			if x, ok := size["x"].(float64); ok {
+				sizeX = x
+			}
+			if y, ok := size["y"].(float64); ok {
+				sizeY = y
+			}
+			if z, ok := size["z"].(float64); ok {
+				sizeZ = z
+			}
+		}
+	}
+	dims := map[string][2]float64{
+		"right": {sizeZ, sizeY}, "left": {sizeZ, sizeY},
+		"top": {sizeX, sizeZ}, "bottom": {sizeX, sizeZ},
+		"front": {sizeX, sizeY}, "back": {sizeX, sizeY},
+	}
+	bounds := e.atlasImage.Bounds()
+	for name, layout := range shape.TextureLayout {
+		d, ok := dims[name]
+		if !ok {
+			continue
+		}
+		w, h := d[0], d[1]
+		if int(layout.Angle)%180 == 90 {
+			w, h = h, w
+		}
+		// Mirrored faces extend backwards from the offset (texU = ox - w).
+		x0, y0 := int(layout.Offset.X), int(layout.Offset.Y)
+		x1, y1 := x0+int(w), y0+int(h)
+		if layout.Mirror.X {
+			x0, x1 = x0-int(w), x0
+		}
+		if layout.Mirror.Y {
+			y0, y1 = y0-int(h), y0
+		}
+		for y := y0; y < y1; y++ {
+			for x := x0; x < x1; x++ {
+				if x < bounds.Min.X || y < bounds.Min.Y || x >= bounds.Max.X || y >= bounds.Max.Y {
+					continue
+				}
+				_, _, _, a := e.atlasImage.At(x, y).RGBA()
+				if a>>8 < 13 {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (e *GLBExporter) doubleSidedClone(baseIdx uint32) uint32 {
 	base := e.doc.Materials[baseIdx]
 	clone := *base
 	clone.Name = base.Name + "-doublesided"
