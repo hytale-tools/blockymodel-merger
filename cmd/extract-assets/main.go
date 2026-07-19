@@ -14,7 +14,11 @@ var pathMappings = map[string]string{
 	"Common/Characters":     "assets/Characters",
 	"Common/Cosmetics":      "assets/Cosmetics",
 	"Common/TintGradients":  "assets/TintGradients",
+	"Common/BlockTextures":  "assets/BlockTextures",
+	"Common/Blocks":         "assets/Blocks",
 	"Cosmetics/CharacterCreator": "data",
+	"Server/Item/Items":     "data/Items",
+	"Server/Item/Animations": "data/Animations",
 }
 
 func main() {
@@ -25,7 +29,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  Common/Characters -> assets/Characters\n")
 		fmt.Fprintf(os.Stderr, "  Common/Cosmetics -> assets/Cosmetics\n")
 		fmt.Fprintf(os.Stderr, "  Common/TintGradients -> assets/TintGradients\n")
+		fmt.Fprintf(os.Stderr, "  Common/BlockTextures -> assets/BlockTextures\n")
+		fmt.Fprintf(os.Stderr, "  Common/Blocks -> assets/Blocks\n")
 		fmt.Fprintf(os.Stderr, "  Cosmetics/CharacterCreator -> data/\n")
+		fmt.Fprintf(os.Stderr, "  Server/Item/Items -> data/Items/\n")
+		fmt.Fprintf(os.Stderr, "  Server/Item/Animations -> data/Animations/\n")
 		os.Exit(1)
 	}
 

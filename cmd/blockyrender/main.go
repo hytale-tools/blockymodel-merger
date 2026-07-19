@@ -14,9 +14,11 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/hytale-tools/blockymodel-merger/pkg/anim"
 	"github.com/hytale-tools/blockymodel-merger/pkg/blockymodel"
 	"github.com/hytale-tools/blockymodel-merger/pkg/pipeline"
 	"github.com/hytale-tools/blockymodel-merger/pkg/render"
@@ -27,6 +29,15 @@ func main() {
 	charFile := flag.String("char", "", "Path to character JSON file")
 	modelFile := flag.String("model", "", "Path to a standalone .blockymodel (instead of -char)")
 	texFile := flag.String("texture", "", "Texture PNG for -model mode (default: white)")
+	holdBlock := flag.String("hold-block", "", "Block item ID to hold (e.g. Soil_Grass); applies the game's carry pose")
+	holdRotate := flag.String("hold-rotate", "", "Extra rotation for the held item, degrees as x,y,z (e.g. -90,0,0)")
+	poseFile := flag.String("pose", "", "Apply frame 0 of a .blockyanim as a static pose")
+	noPose := flag.Bool("no-pose", false, "Keep the bind pose (skip the default carry pose of -hold-block)")
+	var packs []string
+	flag.Func("pack", "External asset pack (mod) root directory; repeatable", func(v string) error {
+		packs = append(packs, v)
+		return nil
+	})
 	view := flag.String("view", "full-body", "Camera preset: full-body, headshot, bust, iso-head, isometric, front-right, front-left, back-right, back-left")
 	rotation := flag.Float64("rotation", 0, "Rotate the character by this many degrees")
 	size := flag.Int("size", 512, "Output image size (square)")
@@ -79,9 +90,19 @@ func main() {
 	loadStart := time.Now()
 	switch {
 	case *modelFile != "":
+		if *holdBlock != "" || *holdRotate != "" || *noPose || len(packs) > 0 {
+			util.Logger.Warn("-hold-block, -hold-rotate, -no-pose and -pack require -char; ignored in -model mode")
+		}
 		model, err := blockymodel.Load(*modelFile)
 		if err != nil {
 			fatal("loading model", err)
+		}
+		if *poseFile != "" {
+			poseAnim, err := anim.Load(*poseFile)
+			if err != nil {
+				fatal("loading pose", err)
+			}
+			poseAnim.ApplyPose(model)
 		}
 		srcModel = model
 		faces = render.Flatten(model)
@@ -95,7 +116,18 @@ func main() {
 			tex = render.NewTexture(whiteImage(16))
 		}
 	case *charFile != "":
-		res, err := pipeline.BuildMergedCharacter(*charFile, *noTint)
+		holdRot, err := parseRotation(*holdRotate)
+		if err != nil {
+			fatal("parsing -hold-rotate", err)
+		}
+		res, err := pipeline.BuildMergedCharacterWithOptions(*charFile, pipeline.Options{
+			NoTint:     *noTint,
+			HoldBlock:  *holdBlock,
+			HoldRotate: holdRot,
+			Pose:       *poseFile,
+			NoPose:     *noPose,
+			Packs:      packs,
+		})
 		if err != nil {
 			fatal("building character", err)
 		}
@@ -165,6 +197,26 @@ func main() {
 func fatal(ctx string, err error) {
 	fmt.Fprintf(os.Stderr, "Error %s: %v\n", ctx, err)
 	os.Exit(1)
+}
+
+// parseRotation parses "x,y,z" degrees into a rotation triple (nil if empty).
+func parseRotation(s string) (*[3]float64, error) {
+	if s == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("expected x,y,z degrees, got %q", s)
+	}
+	var out [3]float64
+	for i, p := range parts {
+		v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid angle %q: %w", p, err)
+		}
+		out[i] = v
+	}
+	return &out, nil
 }
 
 func loadImage(path string) (image.Image, error) {

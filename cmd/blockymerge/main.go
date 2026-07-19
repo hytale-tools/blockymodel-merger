@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"image"
 	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/hytale-tools/blockymodel-merger/pkg/anim"
+	"github.com/hytale-tools/blockymodel-merger/pkg/blocks"
 	"github.com/hytale-tools/blockymodel-merger/pkg/blockymodel"
 	"github.com/hytale-tools/blockymodel-merger/pkg/character"
 	"github.com/hytale-tools/blockymodel-merger/pkg/export"
@@ -32,6 +36,15 @@ func main() {
 	outputName := flag.String("out", defaultOutput, "Output file name (without extension)")
 	formatFlag := flag.String("format", "both", "Output format: glb, blockymodel, or both")
 	noTint := flag.Bool("no-tint", false, "Skip texture tinting (output raw greyscale)")
+	holdBlock := flag.String("hold-block", "", "Block item ID to hold (e.g. Soil_Grass); applies the game's carry pose")
+	holdRotate := flag.String("hold-rotate", "", "Extra rotation for the held item, degrees as x,y,z (e.g. -90,0,0)")
+	poseFile := flag.String("pose", "", "Apply frame 0 of a .blockyanim as a static pose")
+	noPose := flag.Bool("no-pose", false, "Keep the bind pose (skip the default carry pose of -hold-block); use for exports animated at runtime")
+	var packs []string
+	flag.Func("pack", "External asset pack (mod) root directory; repeatable", func(v string) error {
+		packs = append(packs, v)
+		return nil
+	})
 	flag.Parse()
 
 	// Initialize verbose mode (checks env var, CLI flag takes precedence)
@@ -140,8 +153,62 @@ func main() {
 		}
 	}
 
+	// Attach a held block to the hand attachment bone
+	var heldBlock *blocks.Definition
+	var heldTexture image.Image
+	if *holdBlock != "" {
+		heldBlock, err = blocks.Find(*holdBlock, blocks.Sources(packs))
+		if err != nil {
+			util.Logger.Error("Error resolving held block", "block", *holdBlock, "error", err)
+			os.Exit(1)
+		}
+		var rotate *blockymodel.Quaternion
+		if *holdRotate != "" {
+			angles, err := parseRotation(*holdRotate)
+			if err != nil {
+				util.Logger.Error("Error parsing -hold-rotate", "error", err)
+				os.Exit(1)
+			}
+			q := blocks.EulerToQuaternion(angles[0], angles[1], angles[2])
+			rotate = &q
+		}
+		heldModel, heldTex, err := heldBlock.BuildHeld(rotate)
+		if err != nil {
+			util.Logger.Error("Error building held block", "block", *holdBlock, "error", err)
+			os.Exit(1)
+		}
+		heldTexture = heldTex
+		if err := m.Merge(heldModel, blocks.AtlasKey); err != nil {
+			util.Logger.Error("Error merging held block", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	// Get result
 	result := m.Result()
+
+	// Apply a static pose (explicit -pose wins; a held block defaults to the
+	// idle of its own animation set; -no-pose keeps bind pose for exports
+	// that will be animated at runtime)
+	// An explicit -pose always wins; -no-pose only suppresses the default
+	// carry pose of a held block.
+	posePath := *poseFile
+	if posePath == "" && !*noPose && heldBlock != nil {
+		posePath, err = heldBlock.CarryPose()
+		if err != nil {
+			util.Logger.Warn("Carry pose not found; exporting unposed",
+				"block", heldBlock.ID, "animationSet", heldBlock.AnimationsID, "error", err)
+			posePath = ""
+		}
+	}
+	if posePath != "" {
+		poseAnim, err := anim.Load(posePath)
+		if err != nil {
+			util.Logger.Error("Error loading pose", "path", posePath, "error", err)
+			os.Exit(1)
+		}
+		poseAnim.ApplyPose(result)
+	}
 
 	// Debug output
 	if *debug {
@@ -250,6 +317,14 @@ func main() {
 			}
 
 			tintedTextures = append(tintedTextures, tinted)
+		}
+
+		// Held block texture (composed per the block's definition)
+		if heldTexture != nil {
+			tintedTextures = append(tintedTextures, &texture.TintedTexture{
+				Name:  blocks.AtlasKey,
+				Image: heldTexture,
+			})
 		}
 
 		// Pack textures into atlas using simple linear layout (base texture at 0,0)
@@ -370,6 +445,23 @@ func main() {
 	util.Logger.Info("Done")
 }
 
+// parseRotation parses "x,y,z" degrees into a rotation triple.
+func parseRotation(s string) ([3]float64, error) {
+	var out [3]float64
+	parts := strings.Split(s, ",")
+	if len(parts) != 3 {
+		return out, fmt.Errorf("expected x,y,z degrees, got %q", s)
+	}
+	for i, p := range parts {
+		v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if err != nil {
+			return out, fmt.Errorf("invalid angle %q: %w", p, err)
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
 func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  blockymerge -char <character.json> [options]")
@@ -379,9 +471,14 @@ func printUsage() {
 	fmt.Println("  -char      Path to character JSON file")
 	fmt.Println("  -out       Output file name without extension (default: merged)")
 	fmt.Println("  -format    Output format: glb, blockymodel, or both (default: both)")
-	fmt.Println("  -no-tint   Skip texture tinting")
-	fmt.Println("  -verbose   Print verbose output (info messages)")
-	fmt.Println("  -debug     Print merged node tree")
+	fmt.Println("  -no-tint     Skip texture tinting")
+	fmt.Println("  -hold-block  Block item ID to hold (e.g. Soil_Grass); applies the game's carry pose")
+	fmt.Println("  -hold-rotate Extra rotation for the held item, degrees as x,y,z (e.g. -90,0,0)")
+	fmt.Println("  -pose        Apply frame 0 of a .blockyanim as a static pose")
+	fmt.Println("  -no-pose     Keep the bind pose (skip the default carry pose of -hold-block)")
+	fmt.Println("  -pack        External asset pack (mod) root directory; repeatable")
+	fmt.Println("  -verbose     Print verbose output (info messages)")
+	fmt.Println("  -debug       Print merged node tree")
 	fmt.Println()
 	fmt.Println("Environment Variables:")
 	fmt.Println("  BLOCKYMERGE_VERBOSE  Set to any value to enable verbose output")
@@ -390,6 +487,7 @@ func printUsage() {
 	fmt.Println("  blockymerge -char example-character-data.json")
 	fmt.Println("  blockymerge -char example-character-data.json -format glb")
 	fmt.Println("  blockymerge -char example-character-data.json -out my-avatar")
+	fmt.Println("  blockymerge -char example-character-data.json -hold-block Soil_Grass -format glb")
 }
 
 func printNodeTree(nodes []blockymodel.Node, depth int) {

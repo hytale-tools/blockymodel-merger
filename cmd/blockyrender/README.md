@@ -27,6 +27,31 @@ model's bounding box (full body, or the Head subtree for headshots) with a
 1.25x margin. Geometry inside a node named `HeldItem` is excluded from the
 framing box so attachments never shift the character in frame.
 
+## Holding a block
+
+```bash
+# Attach a block to the character's hand, posed with the game's carry animation
+blockyrender -char characters/bree.json -hold-block Soil_Grass -o held.png
+
+# Blocks from an external asset pack (mod) laid out like assets.zip (Common/ + Server/)
+blockyrender -char characters/bree.json -hold-block Pillow_Block_Cyan -pack path/to/pack -o held.png
+
+# Any static pose from a .blockyanim (frame 0); works with -char and -model
+blockyrender -char characters/bree.json -pose "assets/Characters/Animations/Emote/Wave.blockyanim" -o wave.png
+```
+
+`-hold-block` takes a block item ID (the JSON basename under `data/Items/**`,
+e.g. `Soil_Grass`). Cube blocks are rendered as the game's 32^3 held cube with
+their face textures composed per the block definition (greyscale + tint,
+side-mask overlays); `DrawType: Model` blocks (fences etc.) attach their
+`CustomModel`. The pose defaults to the idle of the block's own animation set
+(`PlayerAnimationsId`, resolved through item Parent chains and the
+`Server/Item/Animations` registry); override it with `-pose`, adjust the item
+with `-hold-rotate x,y,z`, or keep the bind pose with `-no-pose` (for exports
+animated at runtime). `-pack` may be repeated; packs take priority over the
+base game data. Requires `assets/BlockTextures`, `assets/Blocks`, and
+`data/Items` (extracted by extract-assets).
+
 ## How the renderer works
 
 | Optimization | Effect here |
