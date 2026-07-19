@@ -30,6 +30,45 @@ type GradientEntry struct {
 type GradientSet struct {
 	ID        string                   `json:"Id"`
 	Gradients map[string]GradientEntry `json:"Gradients"`
+	// colorOrder preserves the JSON declaration order of Gradients; the first
+	// entry is the set's default color.
+	colorOrder []string
+}
+
+// UnmarshalJSON decodes a gradient set while capturing the declaration order
+// of its colors, which a plain map would lose.
+func (s *GradientSet) UnmarshalJSON(data []byte) error {
+	type alias GradientSet
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*s = GradientSet(a)
+
+	var raw struct {
+		Gradients json.RawMessage `json:"Gradients"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || len(raw.Gradients) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw.Gradients))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil
+		}
+		if key, ok := tok.(string); ok {
+			s.colorOrder = append(s.colorOrder, key)
+		}
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return nil
+		}
+	}
+	return nil
 }
 
 // GradientSets holds all loaded gradient sets
@@ -93,6 +132,34 @@ func LoadGradientSets(basePath ...string) (*GradientSets, error) {
 }
 
 // GetGradient returns a gradient entry for a set and color name
+// HasGradient reports whether the named color exists in a gradient set. A nil
+// receiver accepts every color, since without gradient data nothing can be
+// refuted.
+func (gs *GradientSets) HasGradient(setName, colorName string) bool {
+	if gs == nil {
+		return true
+	}
+	set, ok := gs.sets[setName]
+	if !ok {
+		return false
+	}
+	_, ok = set.Gradients[colorName]
+	return ok
+}
+
+// DefaultColor returns the first color declared in a gradient set, or "" if
+// the set is unknown or empty.
+func (gs *GradientSets) DefaultColor(setName string) string {
+	if gs == nil {
+		return ""
+	}
+	set, ok := gs.sets[setName]
+	if !ok || len(set.colorOrder) == 0 {
+		return ""
+	}
+	return set.colorOrder[0]
+}
+
 func (gs *GradientSets) GetGradient(setName, colorName string) (*GradientEntry, error) {
 	set, ok := gs.sets[setName]
 	if !ok {

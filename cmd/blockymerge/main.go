@@ -67,6 +67,10 @@ func main() {
 			os.Exit(1)
 		}
 
+		for _, issue := range charData.Sanitize(reg, gradientSets) {
+			util.Logger.Warn("Invalid character value", "issue", issue.String())
+		}
+
 		result, err := charData.ResolveAccessories(reg)
 		if err != nil {
 			util.Logger.Error("Error resolving accessories", "error", err)

@@ -44,6 +44,10 @@ func BuildMergedCharacter(charFile string, noTint bool) (*Result, error) {
 		return nil, err
 	}
 
+	for _, issue := range charData.Sanitize(reg, gradientSets) {
+		util.Logger.Warn("Invalid character value", "issue", issue.String())
+	}
+
 	resolved, err := charData.ResolveAccessories(reg)
 	if err != nil {
 		return nil, err
