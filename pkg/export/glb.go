@@ -45,6 +45,8 @@ func (e *GLBExporter) AddTexture(imageData []byte) uint32 {
 	// Keep a decoded copy so material sidedness can inspect per-face alpha.
 	if img, err := png.Decode(bytes.NewReader(imageData)); err == nil {
 		e.atlasImage = img
+	} else {
+		util.Logger.Warn("Could not decode atlas for sidedness detection; cutout shapes may render single-sided", "error", err)
 	}
 	imgIdx := uint32(len(e.doc.Images))
 	e.doc.Images = append(e.doc.Images, &gltf.Image{
@@ -145,6 +147,10 @@ func (e *GLBExporter) shapeNeedsDoubleSided(shape *blockymodel.Shape) bool {
 	return e.boxHasTransparentTexels(shape)
 }
 
+// transparentAlphaCutoff mirrors the material's alphaCutoff of 0.05 (13/255):
+// texels below it are discarded by the alpha mask, forming cutout holes.
+const transparentAlphaCutoff = 13
+
 // boxHasTransparentTexels scans each textured face's atlas rect for alpha
 // below the mask cutoff.
 func (e *GLBExporter) boxHasTransparentTexels(shape *blockymodel.Shape) bool {
@@ -177,7 +183,7 @@ func (e *GLBExporter) boxHasTransparentTexels(shape *blockymodel.Shape) bool {
 			continue
 		}
 		w, h := d[0], d[1]
-		if int(layout.Angle)%180 == 90 {
+		if angle := ((int(layout.Angle)%180)+180)%180; angle == 90 {
 			w, h = h, w
 		}
 		// Mirrored faces extend backwards from the offset (texU = ox - w).
@@ -189,13 +195,12 @@ func (e *GLBExporter) boxHasTransparentTexels(shape *blockymodel.Shape) bool {
 		if layout.Mirror.Y {
 			y0, y1 = y0-int(h), y0
 		}
+		x0, y0 = max(x0, bounds.Min.X), max(y0, bounds.Min.Y)
+		x1, y1 = min(x1, bounds.Max.X), min(y1, bounds.Max.Y)
 		for y := y0; y < y1; y++ {
 			for x := x0; x < x1; x++ {
-				if x < bounds.Min.X || y < bounds.Min.Y || x >= bounds.Max.X || y >= bounds.Max.Y {
-					continue
-				}
 				_, _, _, a := e.atlasImage.At(x, y).RGBA()
-				if a>>8 < 13 {
+				if a>>8 < transparentAlphaCutoff {
 					return true
 				}
 			}
