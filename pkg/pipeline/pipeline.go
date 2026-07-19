@@ -67,7 +67,10 @@ func BuildMergedCharacter(charFile string, noTint bool) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := m.Merge(accessory, acc.Spec.ID); err != nil {
+		// Use the type-qualified key as the identifier for tracking texture
+		// offsets - bare IDs can collide across accessory types (e.g.
+		// eyebrows "Medium" vs facialHair "Medium").
+		if err := m.Merge(accessory, acc.Key()); err != nil {
 			return nil, err
 		}
 	}
@@ -132,10 +135,10 @@ func buildTintedTextures(
 				util.Logger.Warn("Failed to load direct texture", "id", acc.Spec.ID, "error", err)
 				continue
 			}
-			tinted = append(tinted, &texture.TintedTexture{Name: acc.Spec.ID, Image: img, OriginalPath: acc.ResolvedTexture.DirectTexture})
+			tinted = append(tinted, &texture.TintedTexture{Name: acc.Key(), Image: img, OriginalPath: acc.ResolvedTexture.DirectTexture})
 		case acc.ResolvedTexture.GreyscaleTexture != "":
 			t, err := texture.ProcessAccessoryTexture(
-				acc.Spec.ID,
+				acc.Key(),
 				acc.ResolvedTexture.GreyscaleTexture,
 				acc.ResolvedTexture.GradientSet,
 				acc.Spec.Color,
