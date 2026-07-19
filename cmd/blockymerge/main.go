@@ -190,11 +190,10 @@ func main() {
 	// Apply a static pose (explicit -pose wins; a held block defaults to the
 	// idle of its own animation set; -no-pose keeps bind pose for exports
 	// that will be animated at runtime)
+	// An explicit -pose always wins; -no-pose only suppresses the default
+	// carry pose of a held block.
 	posePath := *poseFile
-	if *noPose {
-		posePath = ""
-	}
-	if !*noPose && posePath == "" && heldBlock != nil {
+	if posePath == "" && !*noPose && heldBlock != nil {
 		posePath, err = heldBlock.CarryPose()
 		if err != nil {
 			util.Logger.Warn("Carry pose not found; exporting unposed",

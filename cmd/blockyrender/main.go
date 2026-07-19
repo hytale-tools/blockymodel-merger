@@ -90,6 +90,9 @@ func main() {
 	loadStart := time.Now()
 	switch {
 	case *modelFile != "":
+		if *holdBlock != "" || *holdRotate != "" || *noPose || len(packs) > 0 {
+			util.Logger.Warn("-hold-block, -hold-rotate, -no-pose and -pack require -char; ignored in -model mode")
+		}
 		model, err := blockymodel.Load(*modelFile)
 		if err != nil {
 			fatal("loading model", err)

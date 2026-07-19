@@ -174,14 +174,14 @@ func BuildMergedCharacterWithOptions(charFile string, opts Options) (*Result, er
 	return res, nil
 }
 
-// resolvePose picks the pose file: an explicit Pose wins; a held block
-// defaults to the idle of its own animation set (PlayerAnimationsId).
+// resolvePose picks the pose file: an explicit Pose always wins; NoPose only
+// suppresses the default carry pose of a held block.
 func resolvePose(opts Options, heldBlock *blocks.Definition) string {
-	if opts.NoPose {
-		return ""
-	}
 	if opts.Pose != "" {
 		return opts.Pose
+	}
+	if opts.NoPose {
+		return ""
 	}
 	if heldBlock != nil {
 		pose, err := heldBlock.CarryPose()
