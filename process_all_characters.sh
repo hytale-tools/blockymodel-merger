@@ -21,7 +21,7 @@ for char_file in characters/*.json; do
         filename=$(basename "$char_file" .json)
         echo "Processing $filename..."
         ./blockymerge -char "$char_file" -out "$filename"
-        ./blockyrender -char "$char_file" -view full-body -rotation -30 -o "output/$filename.png"
+        ./blockyrender -char "$char_file" -view full-body -size 2048 -rotation -30 -o "output/$filename.png"
     fi
 done
 
