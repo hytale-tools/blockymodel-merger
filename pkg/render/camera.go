@@ -135,6 +135,11 @@ func AutoFitPerspective(faces []Face) PerspectiveCamera {
 			max.Z = float32(math.Max(float64(max.Z), float64(v.Pos.Z)))
 		}
 	}
+	// No vertices leaves the bounds at infinities; fall back to a finite
+	// camera on a unit box at the origin (the render is empty either way).
+	if !(min.X <= max.X && min.Y <= max.Y && min.Z <= max.Z) {
+		min, max = Vec3{-0.5, -0.5, -0.5}, Vec3{0.5, 0.5, 0.5}
+	}
 	center := Vec3{(min.X + max.X) / 2, (min.Y + max.Y) / 2, (min.Z + max.Z) / 2}
 	size := Vec3{max.X - min.X, max.Y - min.Y, max.Z - min.Z}
 	maxDim := math.Max(float64(size.X), math.Max(float64(size.Y), float64(size.Z)))

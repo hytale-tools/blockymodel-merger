@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,6 +78,10 @@ func main() {
 		if err != nil {
 			util.Logger.Error("Error loading character file", "file", *charFile, "error", err)
 			os.Exit(1)
+		}
+
+		for _, issue := range charData.Sanitize(reg, gradientSets) {
+			util.Logger.Warn("Invalid character value", "issue", issue.String())
 		}
 
 		result, err := charData.ResolveAccessories(reg)
@@ -383,12 +389,13 @@ func main() {
 			util.Logger.Debug("Atlas dimensions for UV", "width", w, "height", h)
 			exporter.SetAtlasSize(float64(w), float64(h))
 
-			// Encode atlas to PNG bytes
-			atlasBytes, err := texture.EncodePNG(atlas.Image)
-			if err != nil {
+			// Default PNG compression: this goes into a downloadable file.
+			var buf bytes.Buffer
+			if err := png.Encode(&buf, atlas.Image); err != nil {
 				util.Logger.Error("Error encoding atlas", "error", err)
 				os.Exit(1)
 			}
+			atlasBytes := buf.Bytes()
 
 			texIdx := exporter.AddTexture(atlasBytes)
 			materialIdx = exporter.AddMaterial("textured", texIdx)
