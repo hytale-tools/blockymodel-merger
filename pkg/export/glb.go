@@ -16,6 +16,7 @@ import (
 type GLBExporter struct {
 	doc         *gltf.Document
 	materials   map[string]int
+	dsMaterials map[uint32]uint32 // base material index -> double-sided clone index
 	atlasWidth  float64
 	atlasHeight float64
 }
@@ -24,8 +25,9 @@ type GLBExporter struct {
 func NewGLBExporter() *GLBExporter {
 	doc := gltf.NewDocument()
 	return &GLBExporter{
-		doc:       doc,
-		materials: make(map[string]int),
+		doc:         doc,
+		materials:   make(map[string]int),
+		dsMaterials: make(map[uint32]uint32),
 	}
 }
 
@@ -111,18 +113,17 @@ func (e *GLBExporter) materialFor(baseIdx uint32, shape *blockymodel.Shape) uint
 	if shape == nil || shape.DoubleSided == nil || !*shape.DoubleSided {
 		return baseIdx
 	}
-	base := e.doc.Materials[baseIdx]
-	name := base.Name + "-doublesided"
-	if idx, ok := e.materials[name]; ok {
-		return uint32(idx)
+	if idx, ok := e.dsMaterials[baseIdx]; ok {
+		return idx
 	}
+	base := e.doc.Materials[baseIdx]
 	clone := *base
-	clone.Name = name
+	clone.Name = base.Name + "-doublesided"
 	clone.DoubleSided = true
-	materialIdx := len(e.doc.Materials)
+	materialIdx := uint32(len(e.doc.Materials))
 	e.doc.Materials = append(e.doc.Materials, &clone)
-	e.materials[name] = materialIdx
-	return uint32(materialIdx)
+	e.dsMaterials[baseIdx] = materialIdx
+	return materialIdx
 }
 
 // ExportModel exports a BlockyModel to GLB with hierarchical nodes
