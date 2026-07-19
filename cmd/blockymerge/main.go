@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -307,12 +309,13 @@ func main() {
 			util.Logger.Debug("Atlas dimensions for UV", "width", w, "height", h)
 			exporter.SetAtlasSize(float64(w), float64(h))
 
-			// Encode atlas to PNG bytes
-			atlasBytes, err := texture.EncodePNG(atlas.Image)
-			if err != nil {
+			// Default PNG compression: this goes into a downloadable file.
+			var buf bytes.Buffer
+			if err := png.Encode(&buf, atlas.Image); err != nil {
 				util.Logger.Error("Error encoding atlas", "error", err)
 				os.Exit(1)
 			}
+			atlasBytes := buf.Bytes()
 
 			texIdx := exporter.AddTexture(atlasBytes)
 			materialIdx = exporter.AddMaterial("textured", texIdx)
