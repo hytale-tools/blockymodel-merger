@@ -471,9 +471,14 @@ func printUsage() {
 	fmt.Println("  -char      Path to character JSON file")
 	fmt.Println("  -out       Output file name without extension (default: merged)")
 	fmt.Println("  -format    Output format: glb, blockymodel, or both (default: both)")
-	fmt.Println("  -no-tint   Skip texture tinting")
-	fmt.Println("  -verbose   Print verbose output (info messages)")
-	fmt.Println("  -debug     Print merged node tree")
+	fmt.Println("  -no-tint     Skip texture tinting")
+	fmt.Println("  -hold-block  Block item ID to hold (e.g. Soil_Grass); applies the game's carry pose")
+	fmt.Println("  -hold-rotate Extra rotation for the held item, degrees as x,y,z (e.g. -90,0,0)")
+	fmt.Println("  -pose        Apply frame 0 of a .blockyanim as a static pose")
+	fmt.Println("  -no-pose     Keep the bind pose (skip the default carry pose of -hold-block)")
+	fmt.Println("  -pack        External asset pack (mod) root directory; repeatable")
+	fmt.Println("  -verbose     Print verbose output (info messages)")
+	fmt.Println("  -debug       Print merged node tree")
 	fmt.Println()
 	fmt.Println("Environment Variables:")
 	fmt.Println("  BLOCKYMERGE_VERBOSE  Set to any value to enable verbose output")
@@ -482,6 +487,7 @@ func printUsage() {
 	fmt.Println("  blockymerge -char example-character-data.json")
 	fmt.Println("  blockymerge -char example-character-data.json -format glb")
 	fmt.Println("  blockymerge -char example-character-data.json -out my-avatar")
+	fmt.Println("  blockymerge -char example-character-data.json -hold-block Soil_Grass -format glb")
 }
 
 func printNodeTree(nodes []blockymodel.Node, depth int) {
