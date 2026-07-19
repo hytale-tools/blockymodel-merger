@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"image"
+	"sync"
 
 	"github.com/hytale-tools/blockymodel-merger/pkg/anim"
 	"github.com/hytale-tools/blockymodel-merger/pkg/blocks"
@@ -54,19 +55,25 @@ type Options struct {
 	Packs []string
 }
 
-// BuildMergedCharacter loads a character config, merges all resolved accessories
-// onto the base player model, tints the textures, packs an atlas, and rewrites
-// the merged model's texture-layout offsets into atlas space.
+// Builder builds merged characters while caching everything immutable across
+// builds: the registry, gradient sets, base model, parsed accessory models,
+// and tinted texture images. A long-lived process (e.g. an API server) should
+// create one Builder and reuse it - repeat builds then skip all file loading
+// and tinting except for accessories and colors not seen before.
 //
-// This mirrors the orchestration in cmd/blockymerge so a render and a GLB export
-// of the same character share identical geometry and texture coordinates.
-func BuildMergedCharacter(charFile string, noTint bool) (*Result, error) {
-	return BuildMergedCharacterWithOptions(charFile, Options{NoTint: noTint})
+// Builder is safe for concurrent use.
+type Builder struct {
+	gradientSets *texture.GradientSets
+	reg          *registry.Registry
+	base         *blockymodel.BlockyModel
+
+	mu     sync.RWMutex
+	models map[string]*blockymodel.BlockyModel // accessory path -> parsed model
+	images map[string]image.Image              // tint key -> tinted image
 }
 
-// BuildMergedCharacterWithOptions is BuildMergedCharacter with held-block and
-// pose support.
-func BuildMergedCharacterWithOptions(charFile string, opts Options) (*Result, error) {
+// NewBuilder loads the registry, gradient sets, and base player model.
+func NewBuilder() (*Builder, error) {
 	gradientSets, err := texture.LoadGradientSets()
 	if err != nil {
 		util.Logger.Warn("Could not load gradient sets", "error", err)
@@ -77,16 +84,43 @@ func BuildMergedCharacterWithOptions(charFile string, opts Options) (*Result, er
 		return nil, err
 	}
 
-	charData, err := character.Load(charFile)
+	base, err := blockymodel.Load(BasePath)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, issue := range charData.Sanitize(reg, gradientSets) {
+	return &Builder{
+		gradientSets: gradientSets,
+		reg:          reg,
+		base:         base,
+		models:       make(map[string]*blockymodel.BlockyModel),
+		images:       make(map[string]image.Image),
+	}, nil
+}
+
+// BuildFile builds a character from a config file path.
+func (b *Builder) BuildFile(charFile string, opts Options) (*Result, error) {
+	charData, err := character.Load(charFile)
+	if err != nil {
+		return nil, err
+	}
+	return b.Build(charData, opts)
+}
+
+// Build sanitizes the character config, merges all resolved accessories onto
+// the base player model, tints the textures, packs an atlas, and rewrites the
+// merged model's texture-layout offsets into atlas space. Invalid config
+// values are repaired in place and logged.
+//
+// This mirrors the orchestration in cmd/blockymerge so a render and a GLB
+// export of the same character share identical geometry and texture
+// coordinates.
+func (b *Builder) Build(charData *character.CharacterData, opts Options) (*Result, error) {
+	for _, issue := range charData.Sanitize(b.reg, b.gradientSets) {
 		util.Logger.Warn("Invalid character value", "issue", issue.String())
 	}
 
-	resolved, err := charData.ResolveAccessories(reg)
+	resolved, err := charData.ResolveAccessories(b.reg)
 	if err != nil {
 		return nil, err
 	}
@@ -94,18 +128,13 @@ func BuildMergedCharacterWithOptions(charFile string, opts Options) (*Result, er
 		util.Logger.Warn("Accessory warning", "message", warn)
 	}
 
-	base, err := blockymodel.Load(BasePath)
-	if err != nil {
-		return nil, err
-	}
-
-	m, err := merger.New(base)
+	m, err := merger.New(b.base)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, acc := range resolved.Accessories {
-		accessory, err := blockymodel.Load(acc.Path)
+		accessory, err := b.model(acc.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +184,7 @@ func BuildMergedCharacterWithOptions(charFile string, opts Options) (*Result, er
 		return res, nil
 	}
 
-	tintedTextures := buildTintedTextures(charData, resolved, gradientSets)
+	tintedTextures := b.tintedTextures(charData, resolved)
 	if heldTexture != nil {
 		tintedTextures = append(tintedTextures, &texture.TintedTexture{Name: blocks.AtlasKey, Image: heldTexture})
 	}
@@ -172,6 +201,65 @@ func BuildMergedCharacterWithOptions(charFile string, opts Options) (*Result, er
 
 	applyAtlasOffsets(model, m, atlas, tintedTextures)
 	return res, nil
+}
+
+// BuildMergedCharacter is the one-shot form of Builder.Build: it loads
+// everything from disk, builds the character, and discards the caches. Use a
+// Builder directly when building more than one character.
+func BuildMergedCharacter(charFile string, noTint bool) (*Result, error) {
+	return BuildMergedCharacterWithOptions(charFile, Options{NoTint: noTint})
+}
+
+// BuildMergedCharacterWithOptions is BuildMergedCharacter with held-block and
+// pose support.
+func BuildMergedCharacterWithOptions(charFile string, opts Options) (*Result, error) {
+	b, err := NewBuilder()
+	if err != nil {
+		return nil, err
+	}
+	return b.BuildFile(charFile, opts)
+}
+
+// model returns the parsed accessory model at path, loading it on first use.
+// Merging only clones from accessory models, so the cached model is shared.
+func (b *Builder) model(path string) (*blockymodel.BlockyModel, error) {
+	b.mu.RLock()
+	cached, ok := b.models[path]
+	b.mu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	model, err := blockymodel.Load(path)
+	if err != nil {
+		return nil, err
+	}
+
+	b.mu.Lock()
+	b.models[path] = model
+	b.mu.Unlock()
+	return model, nil
+}
+
+// image returns the (possibly tinted) texture image for key, computing it via
+// load on first use. Atlas packing only reads pixels, so images are shared.
+func (b *Builder) image(key string, load func() (image.Image, error)) (image.Image, error) {
+	b.mu.RLock()
+	cached, ok := b.images[key]
+	b.mu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	img, err := load()
+	if err != nil {
+		return nil, err
+	}
+
+	b.mu.Lock()
+	b.images[key] = img
+	b.mu.Unlock()
+	return img, nil
 }
 
 // resolvePose picks the pose file: an explicit Pose always wins; NoPose only
@@ -195,29 +283,28 @@ func resolvePose(opts Options, heldBlock *blocks.Definition) string {
 	return ""
 }
 
-func buildTintedTextures(
+func (b *Builder) tintedTextures(
 	charData *character.CharacterData,
 	resolved *character.ResolveResult,
-	gradientSets *texture.GradientSets,
 ) []*texture.TintedTexture {
 	var tinted []*texture.TintedTexture
 
 	// Base player texture (skin-toned).
 	skinTone := charData.GetSkinTone()
-	if skinTone != "" {
-		baseTinted, err := texture.ProcessAccessoryTexture("_base", BaseTexturePath, "Skin", skinTone, gradientSets)
-		if err != nil {
-			util.Logger.Warn("Could not tint base texture", "error", err)
-		} else {
-			tinted = append(tinted, baseTinted)
+	baseImg, err := b.image("base|"+skinTone, func() (image.Image, error) {
+		if skinTone == "" {
+			return texture.LoadImage(BaseTexturePath)
 		}
+		t, err := texture.ProcessAccessoryTexture("_base", BaseTexturePath, "Skin", skinTone, b.gradientSets)
+		if err != nil {
+			return nil, err
+		}
+		return t.Image, nil
+	})
+	if err != nil {
+		util.Logger.Warn("Could not load base texture", "error", err)
 	} else {
-		baseImg, err := texture.LoadImage(BaseTexturePath)
-		if err != nil {
-			util.Logger.Warn("Could not load base texture", "error", err)
-		} else {
-			tinted = append(tinted, &texture.TintedTexture{Name: "_base", Image: baseImg, OriginalPath: BaseTexturePath})
-		}
+		tinted = append(tinted, &texture.TintedTexture{Name: "_base", Image: baseImg, OriginalPath: BaseTexturePath})
 	}
 
 	// Accessory textures.
@@ -227,25 +314,31 @@ func buildTintedTextures(
 		}
 		switch {
 		case acc.ResolvedTexture.DirectTexture != "":
-			img, err := texture.LoadImage(acc.ResolvedTexture.DirectTexture)
+			path := acc.ResolvedTexture.DirectTexture
+			img, err := b.image("direct|"+path, func() (image.Image, error) {
+				return texture.LoadImage(path)
+			})
 			if err != nil {
 				util.Logger.Warn("Failed to load direct texture", "id", acc.Spec.ID, "error", err)
 				continue
 			}
-			tinted = append(tinted, &texture.TintedTexture{Name: acc.Key(), Image: img, OriginalPath: acc.ResolvedTexture.DirectTexture})
+			tinted = append(tinted, &texture.TintedTexture{Name: acc.Key(), Image: img, OriginalPath: path})
 		case acc.ResolvedTexture.GreyscaleTexture != "":
-			t, err := texture.ProcessAccessoryTexture(
-				acc.Key(),
-				acc.ResolvedTexture.GreyscaleTexture,
-				acc.ResolvedTexture.GradientSet,
-				acc.Spec.Color,
-				gradientSets,
-			)
+			path := acc.ResolvedTexture.GreyscaleTexture
+			set := acc.ResolvedTexture.GradientSet
+			color := acc.Spec.Color
+			img, err := b.image("grey|"+path+"|"+set+"|"+color, func() (image.Image, error) {
+				t, err := texture.ProcessAccessoryTexture(acc.Key(), path, set, color, b.gradientSets)
+				if err != nil {
+					return nil, err
+				}
+				return t.Image, nil
+			})
 			if err != nil {
 				util.Logger.Warn("Failed to process accessory texture", "id", acc.Spec.ID, "error", err)
 				continue
 			}
-			tinted = append(tinted, t)
+			tinted = append(tinted, &texture.TintedTexture{Name: acc.Key(), Image: img, OriginalPath: path})
 		}
 	}
 

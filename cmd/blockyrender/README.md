@@ -117,7 +117,10 @@ requests arrive at once. Pick based on load:
   render or many small ones both end up using the whole machine without thrashing.
 
 For batch work, build the character once (`pipeline.BuildMergedCharacter`) and
-call `render.RenderScene` per camera angle (≈1–6 ms each at 512²–1024²).
+call `render.RenderScene` per camera angle (≈1–6 ms each at 512²–1024²). For
+many characters (e.g. an API server), create one `pipeline.Builder` and reuse
+it - the registry, base model, accessory models, and tinted textures are
+cached across builds, dropping a warm build from ~12 ms to under 1 ms.
 
 ## Comparison vs `blockymerge` end-to-end
 
