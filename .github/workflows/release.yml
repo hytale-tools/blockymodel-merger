@@ -169,6 +169,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: release/*
           generate_release_notes: true
           prerelease: ${{ github.event.inputs.prerelease }}
