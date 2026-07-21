@@ -2,6 +2,7 @@ package registry
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,6 +36,7 @@ type AccessoryEntry struct {
 	Model            string                  `json:"Model"`
 	GreyscaleTexture string                  `json:"GreyscaleTexture"`
 	GradientSet      string                  `json:"GradientSet"`
+	IsDefaultAsset   bool                    `json:"IsDefaultAsset,omitempty"` // Entry the game uses when the slot is unset
 	Variants         map[string]VariantEntry `json:"Variants"`
 	Textures         map[string]TextureEntry `json:"Textures"` // For pre-colored textures at top level
 	
@@ -54,15 +56,29 @@ type ResolvedTexture struct {
 	BaseColor        []string // Base colors for display
 }
 
+// Sentinel errors for embedders to classify failures with errors.Is: whether
+// a lookup failed because of the caller's input or the deployment.
+var (
+	// ErrNotFound reports bad caller input: an unknown field type, accessory
+	// ID, or a color/variant with no matching texture.
+	ErrNotFound = errors.New("not found")
+
+	// ErrRegistryUnavailable reports a registry file that was never loaded -
+	// a deployment problem (data files not extracted), not the caller's.
+	ErrRegistryUnavailable = errors.New("registry not available")
+)
+
 // Registry holds all accessory registries loaded from data/*.json
 type Registry struct {
 	entries    map[string]map[string]AccessoryEntry // registryName -> id -> entry
+	defaults   map[string]string                    // registryName -> ID of first IsDefaultAsset entry (file order)
 	dataDir    string                                // Base path for data directory
 	assetsDir  string                                // Base path for assets directory
 }
 
 // Mapping from character data field names to registry file names
 var fieldToRegistry = map[string]string{
+	"bodyCharacteristic": "BodyCharacteristics",
 	"face":          "Faces",
 	"ears":          "Ears",
 	"eyes":          "Eyes",
@@ -116,6 +132,7 @@ func Load(basePath ...string) (*Registry, error) {
 	
 	r := &Registry{
 		entries: make(map[string]map[string]AccessoryEntry),
+		defaults: make(map[string]string),
 		dataDir: dataDir,
 		assetsDir: assetsDir,
 	}
@@ -149,27 +166,46 @@ func (r *Registry) loadRegistry(name, path string) error {
 	for _, entry := range entries {
 		if entry.ID != "" {
 			r.entries[name][entry.ID] = entry
+			// First flagged entry in file order wins (Faces flags two).
+			if entry.IsDefaultAsset {
+				if _, ok := r.defaults[name]; !ok {
+					r.defaults[name] = entry.ID
+				}
+			}
 		}
 	}
 
 	return nil
 }
 
+// DefaultFor returns the accessory ID flagged IsDefaultAsset for the given
+// character field (e.g. "eyes" -> "Medium_Eyes"). When several entries are
+// flagged, the first in file order wins. ok is false when the field is
+// unknown, its registry was not loaded, or no entry is flagged.
+func (r *Registry) DefaultFor(fieldType string) (string, bool) {
+	registryName, ok := fieldToRegistry[fieldType]
+	if !ok {
+		return "", false
+	}
+	id, ok := r.defaults[registryName]
+	return id, ok
+}
+
 // LookupWithVariant finds an accessory by field type, ID, and optional variant
 func (r *Registry) LookupWithVariant(fieldType, id, variant string) (string, error) {
 	registryName, ok := fieldToRegistry[fieldType]
 	if !ok {
-		return "", fmt.Errorf("unknown field type: %s", fieldType)
+		return "", fmt.Errorf("unknown field type %s: %w", fieldType, ErrNotFound)
 	}
 
 	registry, ok := r.entries[registryName]
 	if !ok {
-		return "", fmt.Errorf("registry not loaded: %s", registryName)
+		return "", fmt.Errorf("registry not loaded: %s: %w", registryName, ErrRegistryUnavailable)
 	}
 
 	entry, ok := registry[id]
 	if !ok {
-		return "", fmt.Errorf("accessory '%s' not found in %s registry", id, registryName)
+		return "", fmt.Errorf("accessory '%s' in %s registry: %w", id, registryName, ErrNotFound)
 	}
 
 	var modelPath string
@@ -197,7 +233,7 @@ func (r *Registry) LookupWithVariant(fieldType, id, variant string) (string, err
 	}
 
 	if modelPath == "" {
-		return "", fmt.Errorf("accessory '%s' has no model path (variant: %s)", id, variant)
+		return "", fmt.Errorf("accessory '%s' has no model path (variant: %s): %w", id, variant, ErrNotFound)
 	}
 
 	// Return path relative to base directory (e.g., "{assetsDir}/Cosmetics/...")
@@ -218,17 +254,17 @@ func (r *Registry) Lookup(fieldType, id string) (string, error) {
 func (r *Registry) GetEntry(fieldType, id string) (*AccessoryEntry, error) {
 	registryName, ok := fieldToRegistry[fieldType]
 	if !ok {
-		return nil, fmt.Errorf("unknown field type: %s", fieldType)
+		return nil, fmt.Errorf("unknown field type %s: %w", fieldType, ErrNotFound)
 	}
 
 	registry, ok := r.entries[registryName]
 	if !ok {
-		return nil, fmt.Errorf("registry not loaded: %s", registryName)
+		return nil, fmt.Errorf("registry not loaded: %s: %w", registryName, ErrRegistryUnavailable)
 	}
 
 	entry, ok := registry[id]
 	if !ok {
-		return nil, fmt.Errorf("accessory '%s' not found in %s registry", id, registryName)
+		return nil, fmt.Errorf("accessory '%s' in %s registry: %w", id, registryName, ErrNotFound)
 	}
 
 	return &entry, nil
@@ -309,5 +345,5 @@ func (r *Registry) ResolveTexture(fieldType, id, color, variant string) (*Resolv
 		return result, nil
 	}
 
-	return nil, fmt.Errorf("no texture found for %s (color: %s, variant: %s)", id, color, variant)
+	return nil, fmt.Errorf("no texture found for %s (color: %s, variant: %s): %w", id, color, variant, ErrNotFound)
 }

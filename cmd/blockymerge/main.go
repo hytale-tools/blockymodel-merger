@@ -40,6 +40,7 @@ func main() {
 	holdRotate := flag.String("hold-rotate", "", "Extra rotation for the held item, degrees as x,y,z (e.g. -90,0,0)")
 	poseFile := flag.String("pose", "", "Apply frame 0 of a .blockyanim as a static pose")
 	noPose := flag.Bool("no-pose", false, "Keep the bind pose (skip the default carry pose of -hold-block); use for exports animated at runtime")
+	noDefaults := flag.Bool("no-defaults", false, "Do not fill empty required slots (face, eyes, underwear, ...) with the game's defaults")
 	var packs []string
 	flag.Func("pack", "External asset pack (mod) root directory; repeatable", func(v string) error {
 		packs = append(packs, v)
@@ -78,6 +79,10 @@ func main() {
 		if err != nil {
 			util.Logger.Error("Error loading character file", "file", *charFile, "error", err)
 			os.Exit(1)
+		}
+
+		if !*noDefaults {
+			charData.ApplyDefaults(reg, gradientSets)
 		}
 
 		for _, issue := range charData.Sanitize(reg, gradientSets) {
@@ -476,6 +481,7 @@ func printUsage() {
 	fmt.Println("  -hold-rotate Extra rotation for the held item, degrees as x,y,z (e.g. -90,0,0)")
 	fmt.Println("  -pose        Apply frame 0 of a .blockyanim as a static pose")
 	fmt.Println("  -no-pose     Keep the bind pose (skip the default carry pose of -hold-block)")
+	fmt.Println("  -no-defaults Do not fill empty required slots (face, eyes, underwear, ...) with the game's defaults")
 	fmt.Println("  -pack        External asset pack (mod) root directory; repeatable")
 	fmt.Println("  -verbose     Print verbose output (info messages)")
 	fmt.Println("  -debug       Print merged node tree")

@@ -33,6 +33,7 @@ func main() {
 	holdRotate := flag.String("hold-rotate", "", "Extra rotation for the held item, degrees as x,y,z (e.g. -90,0,0)")
 	poseFile := flag.String("pose", "", "Apply frame 0 of a .blockyanim as a static pose")
 	noPose := flag.Bool("no-pose", false, "Keep the bind pose (skip the default carry pose of -hold-block)")
+	noDefaults := flag.Bool("no-defaults", false, "Do not fill empty required slots (face, eyes, underwear, ...) with the game's defaults")
 	var packs []string
 	flag.Func("pack", "External asset pack (mod) root directory; repeatable", func(v string) error {
 		packs = append(packs, v)
@@ -121,15 +122,22 @@ func main() {
 			fatal("parsing -hold-rotate", err)
 		}
 		res, err := pipeline.BuildMergedCharacterWithOptions(*charFile, pipeline.Options{
-			NoTint:     *noTint,
-			HoldBlock:  *holdBlock,
-			HoldRotate: holdRot,
-			Pose:       *poseFile,
-			NoPose:     *noPose,
-			Packs:      packs,
+			NoTint:        *noTint,
+			ApplyDefaults: !*noDefaults,
+			HoldBlock:     *holdBlock,
+			HoldRotate:    holdRot,
+			Pose:          *poseFile,
+			NoPose:        *noPose,
+			Packs:         packs,
 		})
 		if err != nil {
 			fatal("building character", err)
+		}
+		for _, issue := range res.Issues {
+			util.Logger.Warn("Invalid character value", "issue", issue.String())
+		}
+		for _, warn := range res.Warnings {
+			util.Logger.Warn("Build warning", "message", warn)
 		}
 		srcModel = res.Model
 		faces = render.Flatten(res.Model)

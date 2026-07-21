@@ -50,44 +50,20 @@ func (c *CharacterData) Sanitize(reg *registry.Registry, gradients GradientCheck
 func (c *CharacterData) check(reg *registry.Registry, gradients GradientChecker, repair bool) []ValidationIssue {
 	var issues []ValidationIssue
 
-	fields := []struct {
-		name  string
-		value *string
-	}{
-		{"face", c.Face},
-		{"ears", c.Ears},
-		{"eyes", c.Eyes},
-		{"eyebrows", c.Eyebrows},
-		{"mouth", c.Mouth},
-		{"facialHair", c.FacialHair},
-		{"haircut", c.Haircut},
-		{"underwear", c.Underwear},
-		{"pants", c.Pants},
-		{"overpants", c.Overpants},
-		{"undertop", c.Undertop},
-		{"overtop", c.Overtop},
-		{"shoes", c.Shoes},
-		{"gloves", c.Gloves},
-		{"cape", c.Cape},
-		{"headAccessory", c.HeadAccessory},
-		{"faceAccessory", c.FaceAccessory},
-		{"earAccessory", c.EarAccessory},
-		{"skinFeature", c.SkinFeature},
-	}
-
-	for _, f := range fields {
-		if f.value == nil || *f.value == "" {
+	for _, f := range c.fieldSlots() {
+		if *f.ptr == nil || **f.ptr == "" {
 			continue
 		}
-		spec := ParseAccessorySpec(*f.value)
+		value := *f.ptr
+		spec := ParseAccessorySpec(*value)
 		changed := false
 
 		entry, err := reg.GetEntry(f.name, spec.ID)
 		if err != nil || entry == nil {
-			issue := ValidationIssue{f.name, *f.value, fmt.Sprintf("unknown accessory %q", spec.ID)}
+			issue := ValidationIssue{f.name, *value, fmt.Sprintf("unknown accessory %q", spec.ID)}
 			if repair {
 				issue.Err += ", removed"
-				*f.value = ""
+				*value = ""
 			}
 			issues = append(issues, issue)
 			continue
@@ -97,7 +73,7 @@ func (c *CharacterData) check(reg *registry.Registry, gradients GradientChecker,
 		if spec.Variant != "" {
 			ve, ok := entry.Variants[spec.Variant]
 			if !ok {
-				issue := ValidationIssue{f.name, *f.value, fmt.Sprintf("unknown variant %q", spec.Variant)}
+				issue := ValidationIssue{f.name, *value, fmt.Sprintf("unknown variant %q", spec.Variant)}
 				if repair {
 					issue.Err += ", stripped"
 					spec.Variant = ""
@@ -111,7 +87,7 @@ func (c *CharacterData) check(reg *registry.Registry, gradients GradientChecker,
 
 		if spec.Color != "" {
 			if reason := checkColor(entry, variantEntry, spec.Color, gradients); reason != "" {
-				issue := ValidationIssue{f.name, *f.value, reason}
+				issue := ValidationIssue{f.name, *value, reason}
 				if repair {
 					fallback := fallbackColor(entry, variantEntry, gradients)
 					if fallback != "" {
@@ -127,7 +103,7 @@ func (c *CharacterData) check(reg *registry.Registry, gradients GradientChecker,
 		}
 
 		if repair && changed {
-			*f.value = formatSpec(spec)
+			*value = formatSpec(spec)
 		}
 	}
 

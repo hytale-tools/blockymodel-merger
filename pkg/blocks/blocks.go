@@ -10,6 +10,7 @@ package blocks
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"io/fs"
@@ -43,6 +44,21 @@ const (
 	// game attaches when a block is held: a 32^3 box, so each face samples a
 	// native 32x32 block texture.
 	CubeSize = 32
+)
+
+// Sentinel errors for embedders to classify failures with errors.Is: whether
+// a lookup failed because of the caller's input or the deployment.
+var (
+	// ErrNotFound reports an unknown item ID: caller error.
+	ErrNotFound = errors.New("item not found")
+
+	// ErrNotRenderable reports a known item without renderable block data:
+	// caller error.
+	ErrNotRenderable = errors.New("not a renderable block")
+
+	// ErrSourcesUnavailable reports that no item source directory exists at
+	// all - the assets were never extracted: server misconfiguration.
+	ErrSourcesUnavailable = errors.New("item sources unavailable")
 )
 
 // Source is one place block definitions and their textures can come from.
@@ -226,7 +242,7 @@ func Find(id string, sources []Source) (*Definition, error) {
 	}
 
 	if def.BlockType == nil || (len(def.BlockType.Textures) == 0 && def.BlockType.CustomModel == "") {
-		return nil, fmt.Errorf("item %q (%s) is not a renderable block", id, path)
+		return nil, fmt.Errorf("item %q (%s): %w", id, path, ErrNotRenderable)
 	}
 	if def.BlockType.DrawType != "Cube" && def.BlockType.CustomModel == "" {
 		util.Logger.Warn("Block is not a plain cube; rendering it as one",
@@ -280,8 +296,23 @@ func loadItemDef(id string, sources []Source) (*itemDef, Source, string, error) 
 		}
 		return &def, src, found, nil
 	}
-	return nil, Source{}, "", fmt.Errorf("item %q not found in any source (looked for %s under %s)",
-		id, target, itemsDirs(sources))
+	// Distinguish an unknown ID from missing assets: if no items directory
+	// exists at all, the assets were never extracted.
+	if !anyItemsDirExists(sources) {
+		return nil, Source{}, "", fmt.Errorf("no item source directory exists (looked under %s): %w",
+			itemsDirs(sources), ErrSourcesUnavailable)
+	}
+	return nil, Source{}, "", fmt.Errorf("item %q not found in any source (looked for %s under %s): %w",
+		id, target, itemsDirs(sources), ErrNotFound)
+}
+
+func anyItemsDirExists(sources []Source) bool {
+	for _, s := range sources {
+		if info, err := os.Stat(s.ItemsDir); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func itemsDirs(sources []Source) string {
