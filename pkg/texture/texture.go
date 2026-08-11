@@ -184,7 +184,11 @@ func LoadImage(relativePath string, basePath ...string) (image.Image, error) {
 	hasAssetsPrefix := strings.HasPrefix(relativePath, "assets/") || 
 		strings.HasPrefix(relativePath, "assets"+string(filepath.Separator))
 	
-	if len(basePath) > 0 && basePath[0] != "" {
+	if filepath.IsAbs(relativePath) {
+		// Already a full path (e.g. an asset pack resolved to an absolute
+		// root); joining it onto a base would strip the leading separator.
+		path = relativePath
+	} else if len(basePath) > 0 && basePath[0] != "" {
 		// Base path provided - join directly
 		path = filepath.Join(basePath[0], relativePath)
 	} else {

@@ -63,6 +63,19 @@ type Options struct {
 	// about X, Y, Z. Nil leaves the item in its authored orientation.
 	HoldRotate *[3]float64
 
+	// HoldOffset is an optional extra translation for the held item, in model
+	// units within the hand attachment frame. Nil grafts the item at the
+	// attachment origin, which is right for models authored around their own
+	// origin and wrong for ones that are not (a player-head item model keeps
+	// the character rig it was cut from, so its geometry sits well above the
+	// model origin).
+	HoldOffset *[3]float64
+
+	// HoldScale multiplies the held item's own scale. Zero means no extra
+	// scaling. Use it to size an item to the pose that carries it - the
+	// carry pose's grip is authored for a one-block item.
+	HoldScale float64
+
 	// Pose applies frame 0 of a .blockyanim file as a static pose.
 	// Precedence: PoseAnim > Pose > NoPose > held-block carry pose.
 	Pose string
@@ -82,6 +95,13 @@ type Options struct {
 	// layout (Common/ + Server/). They take priority over the base game data
 	// when resolving blocks and their textures.
 	Packs []string
+
+	// Hide names merged nodes whose geometry is dropped, along with the
+	// geometry of everything under them - e.g. []string{"Head"} renders the
+	// character headless (head, face, hair and any head accessory), which is
+	// what a "carrying your own head" render needs. The bones stay in place,
+	// so nothing else moves. Names that match no node produce a warning.
+	Hide []string
 }
 
 // Builder builds merged characters while caching everything immutable across
@@ -218,7 +238,13 @@ func (b *Builder) Build(charData *character.CharacterData, opts Options) (*Resul
 			q := blocks.EulerToQuaternion(opts.HoldRotate[0], opts.HoldRotate[1], opts.HoldRotate[2])
 			rotate = &q
 		}
-		heldModel, heldTex, err := heldBlock.BuildHeld(rotate)
+		var offset *blockymodel.Vec3
+		if opts.HoldOffset != nil {
+			offset = &blockymodel.Vec3{X: opts.HoldOffset[0], Y: opts.HoldOffset[1], Z: opts.HoldOffset[2]}
+		}
+		heldModel, heldTex, err := heldBlock.BuildHeld(blocks.HeldTransform{
+			Rotate: rotate, Offset: offset, Scale: opts.HoldScale,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -230,6 +256,14 @@ func (b *Builder) Build(charData *character.CharacterData, opts Options) (*Resul
 
 	model := m.Result()
 	res.Model = model
+
+	// Hide after merging so a hidden bone takes its accessories with it (the
+	// haircut and head accessories merge into the Head subtree).
+	if len(opts.Hide) > 0 {
+		for _, name := range blockymodel.HideSubtrees(model.Nodes, opts.Hide) {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("no node named %q to hide", name))
+		}
+	}
 
 	poseAnim := opts.PoseAnim
 	if poseAnim == nil {

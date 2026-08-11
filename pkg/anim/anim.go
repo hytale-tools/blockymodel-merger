@@ -56,6 +56,12 @@ func Load(path string) (*Animation, error) {
 // Deltas are matched to nodes by name, and every node with a matching name is
 // posed - merged accessories clone skeleton bone names (e.g. cape physics
 // bones Cape1..Cape3), and those clones are animated in-game too.
+//
+// The held-item subtree is excluded: the character animation moves the
+// attachment bone the item hangs off, never the item's own rig. Item models
+// keep their authoring skeleton (a severed-head item model still has Pelvis,
+// Chest and Head bones), so posing inside it would apply the character's
+// deltas twice.
 func (a *Animation) ApplyPose(model *blockymodel.BlockyModel) {
 	applyToNodes(model.Nodes, a.NodeAnimations)
 }
@@ -63,6 +69,9 @@ func (a *Animation) ApplyPose(model *blockymodel.BlockyModel) {
 func applyToNodes(nodes []blockymodel.Node, tracks map[string]NodeTracks) {
 	for i := range nodes {
 		n := &nodes[i]
+		if n.Name == blockymodel.HeldItemNodeName {
+			continue
+		}
 		if t, ok := tracks[n.Name]; ok {
 			if len(t.Orientation) > 0 {
 				bind := blockymodel.Quaternion{W: 1}

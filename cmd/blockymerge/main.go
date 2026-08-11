@@ -38,12 +38,19 @@ func main() {
 	noTint := flag.Bool("no-tint", false, "Skip texture tinting (output raw greyscale)")
 	holdBlock := flag.String("hold-block", "", "Block item ID to hold (e.g. Soil_Grass); applies the game's carry pose")
 	holdRotate := flag.String("hold-rotate", "", "Extra rotation for the held item, degrees as x,y,z (e.g. -90,0,0)")
+	holdOffset := flag.String("hold-offset", "", "Extra translation for the held item in the hand's frame, units as x,y,z")
+	holdScale := flag.Float64("hold-scale", 0, "Extra scale multiplier for the held item (0 = the item's own scale)")
 	poseFile := flag.String("pose", "", "Apply frame 0 of a .blockyanim as a static pose")
 	noPose := flag.Bool("no-pose", false, "Keep the bind pose (skip the default carry pose of -hold-block); use for exports animated at runtime")
 	noDefaults := flag.Bool("no-defaults", false, "Do not fill empty required slots (face, eyes, underwear, ...) with the game's defaults")
 	var packs []string
 	flag.Func("pack", "External asset pack (mod) root directory; repeatable", func(v string) error {
 		packs = append(packs, v)
+		return nil
+	})
+	var hide []string
+	flag.Func("hide", "Hide a node and everything under it (e.g. Head); repeatable", func(v string) error {
+		hide = append(hide, v)
 		return nil
 	})
 	flag.Parse()
@@ -177,7 +184,18 @@ func main() {
 			q := blocks.EulerToQuaternion(angles[0], angles[1], angles[2])
 			rotate = &q
 		}
-		heldModel, heldTex, err := heldBlock.BuildHeld(rotate)
+		var offset *blockymodel.Vec3
+		if *holdOffset != "" {
+			units, err := parseRotation(*holdOffset)
+			if err != nil {
+				util.Logger.Error("Error parsing -hold-offset", "error", err)
+				os.Exit(1)
+			}
+			offset = &blockymodel.Vec3{X: units[0], Y: units[1], Z: units[2]}
+		}
+		heldModel, heldTex, err := heldBlock.BuildHeld(blocks.HeldTransform{
+			Rotate: rotate, Offset: offset, Scale: *holdScale,
+		})
 		if err != nil {
 			util.Logger.Error("Error building held block", "block", *holdBlock, "error", err)
 			os.Exit(1)
@@ -191,6 +209,11 @@ func main() {
 
 	// Get result
 	result := m.Result()
+
+	// Hide after merging so a hidden bone takes its accessories with it
+	for _, name := range blockymodel.HideSubtrees(result.Nodes, hide) {
+		util.Logger.Warn("No node to hide", "name", name)
+	}
 
 	// Apply a static pose (explicit -pose wins; a held block defaults to the
 	// idle of its own animation set; -no-pose keeps bind pose for exports

@@ -112,6 +112,9 @@ type blockType struct {
 	CustomModelTexture []struct {
 		Texture string `json:"Texture"`
 	} `json:"CustomModelTexture"`
+	// CustomModelScale is the scale the game draws the custom model at, e.g.
+	// 0.75 shrinks an oversized model down to one block (0 = unset).
+	CustomModelScale float64 `json:"CustomModelScale"`
 }
 
 type itemDef struct {
@@ -119,6 +122,11 @@ type itemDef struct {
 	BlockType          *blockType `json:"BlockType"`
 	PlayerAnimationsId string     `json:"PlayerAnimationsId"`
 	Scale              float64    `json:"Scale"` // held-item scale multiplier (0 = unset)
+
+	// Weapon/tool-style items carry their geometry directly instead of a
+	// BlockType (e.g. Template_Weapon_Daggers).
+	Model   string `json:"Model"`
+	Texture string `json:"Texture"`
 }
 
 // Definition is a resolved block definition ready for compositing.
@@ -138,6 +146,10 @@ type Definition struct {
 	source Source   // where the definition was found
 	all    []Source // full search order, for resolving textures
 	block  *blockType
+	// model/tex are set instead of block for weapon/tool-style items whose
+	// definition carries top-level Model + Texture paths.
+	model string
+	tex   string
 }
 
 // animSet mirrors a Server/Item/Animations/<Id>.json animation set: named
@@ -217,7 +229,8 @@ func Find(id string, sources []Source) (*Definition, error) {
 
 	// Inherit missing fields from the Parent chain.
 	seen := map[string]bool{id: true}
-	for parent := def.Parent; parent != "" && (def.PlayerAnimationsId == "" || def.BlockType == nil || def.Scale == 0); {
+	for parent := def.Parent; parent != "" && (def.PlayerAnimationsId == "" || def.BlockType == nil ||
+		def.Scale == 0 || def.Model == "" || def.Texture == ""); {
 		if seen[parent] {
 			util.Logger.Warn("Cycle in item Parent chain", "block", id, "parent", parent)
 			break
@@ -238,13 +251,22 @@ func Find(id string, sources []Source) (*Definition, error) {
 		if def.Scale == 0 {
 			def.Scale = p.Scale
 		}
+		if def.Model == "" {
+			def.Model = p.Model
+		}
+		if def.Texture == "" {
+			def.Texture = p.Texture
+		}
 		parent = p.Parent
 	}
 
-	if def.BlockType == nil || (len(def.BlockType.Textures) == 0 && def.BlockType.CustomModel == "") {
+	blockRenderable := def.BlockType != nil &&
+		(len(def.BlockType.Textures) > 0 || def.BlockType.CustomModel != "")
+	modelRenderable := def.Model != "" && def.Texture != ""
+	if !blockRenderable && !modelRenderable {
 		return nil, fmt.Errorf("item %q (%s): %w", id, path, ErrNotRenderable)
 	}
-	if def.BlockType.DrawType != "Cube" && def.BlockType.CustomModel == "" {
+	if blockRenderable && def.BlockType.DrawType != "Cube" && def.BlockType.CustomModel == "" {
 		util.Logger.Warn("Block is not a plain cube; rendering it as one",
 			"block", id, "drawType", def.BlockType.DrawType)
 	}
@@ -256,14 +278,19 @@ func Find(id string, sources []Source) (*Definition, error) {
 	if scale == 0 {
 		scale = 1
 	}
-	return &Definition{
+	d := &Definition{
 		ID:           id,
 		AnimationsID: animID,
 		Scale:        scale,
 		source:       src,
 		all:          sources,
-		block:        def.BlockType,
-	}, nil
+	}
+	if blockRenderable {
+		d.block = def.BlockType
+	} else {
+		d.model, d.tex = def.Model, def.Texture
+	}
+	return d, nil
 }
 
 // loadItemDef reads the item JSON named <id>.json from the first source
@@ -341,24 +368,46 @@ func (d *Definition) resolveFile(rel string) (string, error) {
 // BuildHeld returns the held-item accessory to merge onto the character and
 // the texture image to pack into the atlas (keyed by AtlasKey).
 //
+// HeldTransform are explicit caller overrides for how a held item sits in the
+// hand, on top of the placement the item definition itself implies. Rotate and
+// Offset land on the HeldItem wrapper node; Offset moves the item within the
+// attachment frame, which a custom model whose geometry is not authored around
+// its own origin needs.
+type HeldTransform struct {
+	Rotate *blockymodel.Quaternion
+	Offset *blockymodel.Vec3
+
+	// Scale multiplies the item's own scale (its CustomModelScale and
+	// item-level Scale). Zero means no extra scaling.
+	Scale float64
+}
+
 // Cube blocks become an Empty_Cube-style 32^3 box textured with a composed
 // face strip; DrawType=Model blocks attach their CustomModel with its own
-// texture, in the model's authored orientation. rotate, if non-nil, is an
-// explicit extra rotation applied to the HeldItem wrapper node.
-func (d *Definition) BuildHeld(rotate *blockymodel.Quaternion) (*blockymodel.BlockyModel, image.Image, error) {
+// texture, in the model's authored orientation.
+func (d *Definition) BuildHeld(t HeldTransform) (*blockymodel.BlockyModel, image.Image, error) {
 	model, img, err := d.buildHeld()
 	if err != nil {
 		return nil, nil, err
 	}
-	if rotate != nil {
-		if held := findNode(model.Nodes, HeldItemNodeName); held != nil {
-			held.Orientation = rotate
+	if held := findNode(model.Nodes, HeldItemNodeName); held != nil {
+		if t.Scale != 0 && t.Scale != 1 {
+			scaleNodes(held.Children, t.Scale)
+		}
+		if t.Rotate != nil {
+			held.Orientation = t.Rotate
+		}
+		if t.Offset != nil {
+			held.Position = t.Offset
 		}
 	}
 	return model, img, nil
 }
 
 func (d *Definition) buildHeld() (*blockymodel.BlockyModel, image.Image, error) {
+	if d.block == nil {
+		return d.buildFromModel(d.model, d.tex, d.Scale)
+	}
 	if d.block.CustomModel != "" {
 		return d.buildCustomModel()
 	}
@@ -406,36 +455,50 @@ func findNode(nodes []blockymodel.Node, name string) *blockymodel.Node {
 }
 
 func (d *Definition) buildCustomModel() (*blockymodel.BlockyModel, image.Image, error) {
-	modelPath, err := d.resolveFile(d.block.CustomModel)
-	if err != nil {
-		return nil, nil, fmt.Errorf("block %q: %w", d.ID, err)
-	}
-	model, err := blockymodel.Load(modelPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("block %q custom model: %w", d.ID, err)
-	}
-
 	if len(d.block.CustomModelTexture) == 0 {
 		return nil, nil, fmt.Errorf("block %q has a custom model but no CustomModelTexture", d.ID)
 	}
-	texPath, err := d.resolveFile(d.block.CustomModelTexture[0].Texture)
+	// CustomModelScale is the model's own scale as a block (a player-head model
+	// is authored oversized and drawn at 0.75); the item-level Scale is the
+	// held-item multiplier on top of it.
+	scale := d.Scale
+	if d.block.CustomModelScale != 0 {
+		scale *= d.block.CustomModelScale
+	}
+	return d.buildFromModel(d.block.CustomModel, d.block.CustomModelTexture[0].Texture, scale)
+}
+
+// buildFromModel attaches a blockymodel + texture pair as the held item:
+// a BlockType's CustomModel or a weapon/tool item's top-level Model.
+func (d *Definition) buildFromModel(modelRel, texRel string, scale float64) (*blockymodel.BlockyModel, image.Image, error) {
+	modelPath, err := d.resolveFile(modelRel)
 	if err != nil {
-		return nil, nil, fmt.Errorf("block %q: %w", d.ID, err)
+		return nil, nil, fmt.Errorf("item %q: %w", d.ID, err)
+	}
+	model, err := blockymodel.Load(modelPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("item %q model: %w", d.ID, err)
+	}
+
+	texPath, err := d.resolveFile(texRel)
+	if err != nil {
+		return nil, nil, fmt.Errorf("item %q: %w", d.ID, err)
 	}
 	img, err := texture.LoadImage(texPath, ".")
 	if err != nil {
-		return nil, nil, fmt.Errorf("block %q custom model texture: %w", d.ID, err)
+		return nil, nil, fmt.Errorf("item %q model texture: %w", d.ID, err)
 	}
-	// The game ignores the custom model's root node transform when attaching
-	// it as a held item - root transforms are placement/editor artifacts (the
+	// The game ignores the model's root node transform when attaching it as a
+	// held item - root transforms are placement/editor artifacts (the
 	// pillow-mod daki's root carries a rotation+offset that would otherwise
-	// sink it into the character). Verified against in-game screenshots.
+	// sink it into the character; a dagger's root is its own R-Attachment
+	// grip bone at an authoring offset). Verified against in-game screenshots.
 	for i := range model.Nodes {
 		model.Nodes[i].Position = &blockymodel.Vec3{}
 		model.Nodes[i].Orientation = &blockymodel.Quaternion{W: 1}
 	}
-	if d.Scale != 1 {
-		scaleNodes(model.Nodes, d.Scale)
+	if scale != 1 {
+		scaleNodes(model.Nodes, scale)
 	}
 	return wrapHeldItem(model.Nodes), img, nil
 }
@@ -470,8 +533,10 @@ func scaleNodes(nodes []blockymodel.Node, s float64) {
 }
 
 // wrapHeldItem parents the given geometry under R-Attachment inside a single
-// HeldItemNodeName group node.
+// HeldItemNodeName group node, namespacing the item's own bone names so they
+// cannot be mistaken for the character's (see HeldItemNodePrefix).
 func wrapHeldItem(nodes []blockymodel.Node) *blockymodel.BlockyModel {
+	prefixNames(nodes)
 	return &blockymodel.BlockyModel{
 		Nodes: []blockymodel.Node{{
 			ID:   "0",
@@ -489,6 +554,16 @@ func wrapHeldItem(nodes []blockymodel.Node) *blockymodel.BlockyModel {
 				Children:    nodes,
 			}},
 		}},
+	}
+}
+
+// prefixNames namespaces a held item's own node names in place. The HeldItem
+// wrapper itself keeps its exact name: viewers toggle that one node to show or
+// hide the item.
+func prefixNames(nodes []blockymodel.Node) {
+	for i := range nodes {
+		nodes[i].Name = blockymodel.HeldItemNodePrefix + nodes[i].Name
+		prefixNames(nodes[i].Children)
 	}
 }
 

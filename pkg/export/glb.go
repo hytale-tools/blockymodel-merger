@@ -14,6 +14,11 @@ import (
 	"github.com/hytale-tools/blockymodel-merger/pkg/util"
 )
 
+// MeshNodeSuffix distinguishes the geometry node split out of a blockymodel
+// node that is both a bone and a mesh, so every bone name in the exported
+// scene resolves to exactly one node.
+const MeshNodeSuffix = ".mesh"
+
 // GLBExporter exports BlockyModel to GLB format matching Blockbench's output exactly
 type GLBExporter struct {
 	doc         *gltf.Document
@@ -288,9 +293,14 @@ func (e *GLBExporter) processNodeBlockbench(node *blockymodel.Node, materialIdx 
 	if node.Shape != nil && node.Shape.Type != "none" {
 		meshIdx := e.createMeshCentered(node, materialIdx)
 		if meshIdx >= 0 {
-			// Create mesh node with translation = shape offset
+			// Create mesh node with translation = shape offset.
+			// It is deliberately NOT named after the node: a blockymodel node
+			// can be both a bone and geometry, which splits into two glTF
+			// nodes here, and a player binding animation tracks by bone name
+			// would then have two candidates - picking the mesh child rotates
+			// the geometry in place while the limb below it stays put.
 			meshNode := &gltf.Node{
-				Name: node.Name,
+				Name: node.Name + MeshNodeSuffix,
 				Translation: [3]float64{offsetX, offsetY, offsetZ},
 				Mesh: gltf.Index(meshIdx),
 			}
