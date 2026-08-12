@@ -382,10 +382,31 @@ type HeldTransform struct {
 	Scale float64
 }
 
+// validate rejects NaN and infinite transform components - flag parsing
+// accepts them, and they would silently corrupt geometry or serialization.
+func (t HeldTransform) validate() error {
+	vals := []float64{t.Scale}
+	if t.Rotate != nil {
+		vals = append(vals, t.Rotate.X, t.Rotate.Y, t.Rotate.Z, t.Rotate.W)
+	}
+	if t.Offset != nil {
+		vals = append(vals, t.Offset.X, t.Offset.Y, t.Offset.Z)
+	}
+	for _, v := range vals {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return fmt.Errorf("held-item transform values must be finite, got %v", v)
+		}
+	}
+	return nil
+}
+
 // Cube blocks become an Empty_Cube-style 32^3 box textured with a composed
 // face strip; DrawType=Model blocks attach their CustomModel with its own
 // texture, in the model's authored orientation.
 func (d *Definition) BuildHeld(t HeldTransform) (*blockymodel.BlockyModel, image.Image, error) {
+	if err := t.validate(); err != nil {
+		return nil, nil, err
+	}
 	model, img, err := d.buildHeld()
 	if err != nil {
 		return nil, nil, err

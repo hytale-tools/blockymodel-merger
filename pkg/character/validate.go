@@ -1,6 +1,7 @@
 package character
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -59,6 +60,12 @@ func (c *CharacterData) check(reg *registry.Registry, gradients GradientChecker,
 		changed := false
 
 		entry, err := reg.GetEntry(f.name, spec.ID)
+		if errors.Is(err, registry.ErrRegistryUnavailable) {
+			// A missing registry says nothing about the value - leave the slot
+			// alone rather than repairing it away.
+			issues = append(issues, ValidationIssue{f.name, *value, "registry unavailable, left unchecked"})
+			continue
+		}
 		if err != nil || entry == nil {
 			issue := ValidationIssue{f.name, *value, fmt.Sprintf("unknown accessory %q", spec.ID)}
 			if repair {

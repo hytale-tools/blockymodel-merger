@@ -98,8 +98,8 @@ func main() {
 	loadStart := time.Now()
 	switch {
 	case *modelFile != "":
-		if *holdBlock != "" || *holdRotate != "" || *holdOffset != "" || *holdScale != 0 || *noPose || len(packs) > 0 || len(hide) > 0 {
-			util.Logger.Warn("-hold-block, -hold-rotate, -hold-offset, -hold-scale, -no-pose, -pack and -hide require -char; ignored in -model mode")
+		if *holdBlock != "" || *holdRotate != "" || *holdOffset != "" || *holdScale != 0 || *noPose || *noDefaults || len(packs) > 0 || len(hide) > 0 {
+			util.Logger.Warn("-hold-block, -hold-rotate, -hold-offset, -hold-scale, -no-pose, -no-defaults, -pack and -hide require -char; ignored in -model mode")
 		}
 		model, err := blockymodel.Load(*modelFile)
 		if err != nil {
