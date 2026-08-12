@@ -222,8 +222,13 @@ go build -o item-to-glb ./cmd/item-to-glb
 | `-out`        | `merged`   | Output file name (without extension)           |
 | `-format`     | `both`     | Output format: `glb`, `blockymodel`, or `both` |
 | `-no-tint`    | `false`    | Skip texture tinting (output raw greyscale)    |
+| `-no-defaults` | `false`   | Do not fill empty required slots (face, eyes, underwear, ...) with the game's defaults |
 | `-debug`      | `false`    | Print debug output showing node tree           |
 | `-hold-block` | (none)     | Block item ID to place in the character's hand (e.g. `Soil_Grass`); applies the game's carry pose |
+| `-hold-rotate` | (none)    | Extra rotation for the held item, degrees as `x,y,z` (e.g. `-90,0,0`) |
+| `-hold-offset` | (none)    | Extra translation for the held item in the hand's frame, units as `x,y,z` |
+| `-hold-scale` | `0`        | Extra scale multiplier for the held item (`0` = the item's own scale) |
+| `-hide`       | (none)     | Hide a node and everything under it (e.g. `Head`); repeatable |
 | `-pose`       | (none)     | Apply frame 0 of a `.blockyanim` as a static pose |
 | `-pack`       | (none)     | External asset pack (mod) root directory; repeatable, takes priority over base assets |
 

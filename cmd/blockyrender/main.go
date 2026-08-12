@@ -31,11 +31,19 @@ func main() {
 	texFile := flag.String("texture", "", "Texture PNG for -model mode (default: white)")
 	holdBlock := flag.String("hold-block", "", "Block item ID to hold (e.g. Soil_Grass); applies the game's carry pose")
 	holdRotate := flag.String("hold-rotate", "", "Extra rotation for the held item, degrees as x,y,z (e.g. -90,0,0)")
+	holdOffset := flag.String("hold-offset", "", "Extra translation for the held item in the hand's frame, units as x,y,z")
+	holdScale := flag.Float64("hold-scale", 0, "Extra scale multiplier for the held item (0 = the item's own scale)")
 	poseFile := flag.String("pose", "", "Apply frame 0 of a .blockyanim as a static pose")
 	noPose := flag.Bool("no-pose", false, "Keep the bind pose (skip the default carry pose of -hold-block)")
+	noDefaults := flag.Bool("no-defaults", false, "Do not fill empty required slots (face, eyes, underwear, ...) with the game's defaults")
 	var packs []string
 	flag.Func("pack", "External asset pack (mod) root directory; repeatable", func(v string) error {
 		packs = append(packs, v)
+		return nil
+	})
+	var hide []string
+	flag.Func("hide", "Hide a node and everything under it (e.g. Head); repeatable", func(v string) error {
+		hide = append(hide, v)
 		return nil
 	})
 	view := flag.String("view", "full-body", "Camera preset: full-body, headshot, bust, iso-head, isometric, front-right, front-left, back-right, back-left")
@@ -90,8 +98,8 @@ func main() {
 	loadStart := time.Now()
 	switch {
 	case *modelFile != "":
-		if *holdBlock != "" || *holdRotate != "" || *noPose || len(packs) > 0 {
-			util.Logger.Warn("-hold-block, -hold-rotate, -no-pose and -pack require -char; ignored in -model mode")
+		if *holdBlock != "" || *holdRotate != "" || *holdOffset != "" || *holdScale != 0 || *noPose || *noDefaults || len(packs) > 0 || len(hide) > 0 {
+			util.Logger.Warn("-hold-block, -hold-rotate, -hold-offset, -hold-scale, -no-pose, -no-defaults, -pack and -hide require -char; ignored in -model mode")
 		}
 		model, err := blockymodel.Load(*modelFile)
 		if err != nil {
@@ -116,20 +124,34 @@ func main() {
 			tex = render.NewTexture(whiteImage(16))
 		}
 	case *charFile != "":
-		holdRot, err := parseRotation(*holdRotate)
+		holdRot, err := parseTriple(*holdRotate)
 		if err != nil {
 			fatal("parsing -hold-rotate", err)
 		}
+		holdOff, err := parseTriple(*holdOffset)
+		if err != nil {
+			fatal("parsing -hold-offset", err)
+		}
 		res, err := pipeline.BuildMergedCharacterWithOptions(*charFile, pipeline.Options{
-			NoTint:     *noTint,
-			HoldBlock:  *holdBlock,
-			HoldRotate: holdRot,
-			Pose:       *poseFile,
-			NoPose:     *noPose,
-			Packs:      packs,
+			NoTint:        *noTint,
+			ApplyDefaults: !*noDefaults,
+			HoldBlock:     *holdBlock,
+			HoldRotate:    holdRot,
+			HoldOffset:    holdOff,
+			HoldScale:     *holdScale,
+			Pose:          *poseFile,
+			NoPose:        *noPose,
+			Packs:         packs,
+			Hide:          hide,
 		})
 		if err != nil {
 			fatal("building character", err)
+		}
+		for _, issue := range res.Issues {
+			util.Logger.Warn("Invalid character value", "issue", issue.String())
+		}
+		for _, warn := range res.Warnings {
+			util.Logger.Warn("Build warning", "message", warn)
 		}
 		srcModel = res.Model
 		faces = render.Flatten(res.Model)
@@ -199,8 +221,8 @@ func fatal(ctx string, err error) {
 	os.Exit(1)
 }
 
-// parseRotation parses "x,y,z" degrees into a rotation triple (nil if empty).
-func parseRotation(s string) (*[3]float64, error) {
+// parseTriple parses "x,y,z" into a triple of degrees or units (nil if empty).
+func parseTriple(s string) (*[3]float64, error) {
 	if s == "" {
 		return nil, nil
 	}
@@ -251,5 +273,8 @@ func writePNG(img image.Image, path string) error {
 		return err
 	}
 	defer f.Close()
-	return png.Encode(f, img)
+	// Encoding dominates render time (~7ms default vs ~1ms rasterizing a
+	// 512px frame); BestSpeed cuts that ~35% for ~8% larger files.
+	enc := &png.Encoder{CompressionLevel: png.BestSpeed}
+	return enc.Encode(f, img)
 }

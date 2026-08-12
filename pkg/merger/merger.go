@@ -77,7 +77,11 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) 
 		// Children are cloned as-is with their positions unchanged.
 		for i := range accessoryNode.Children {
 			child := &accessoryNode.Children[i]
-			if !child.IsSkeletonReference() && !m.isAttachmentPoint(child) {
+			if child.Name == blockymodel.HeldItemNodeName {
+				if err := m.attachVerbatim(baseNode, child, accessoryID); err != nil {
+					return err
+				}
+			} else if !child.IsSkeletonReference() && !m.isAttachmentPoint(child) {
 				// Clone and re-ID the child, then append to base
 				cloned, err := blockymodel.CloneNode(child)
 				if err != nil {
@@ -105,12 +109,29 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) 
 	return nil
 }
 
+// attachVerbatim clones an entire subtree onto baseNode without any bone
+// matching. It is how the held-item group is merged: an item model brings its
+// own authoring rig, whose bone names collide with the character's (a
+// severed-head item model has Head, Chest and eye bones of its own), so
+// matching inside it would graft the item's geometry onto the character.
+func (m *Merger) attachVerbatim(baseNode, node *blockymodel.Node, accessoryID string) error {
+	cloned, err := blockymodel.CloneNode(node)
+	if err != nil {
+		return fmt.Errorf("failed to clone node %s: %w", node.Name, err)
+	}
+	m.reIDNode(cloned, accessoryID)
+	baseNode.Children = append(baseNode.Children, *cloned)
+	return nil
+}
+
 // filterSkeletonRefs removes skeleton reference nodes from children and processes their children instead
 func (m *Merger) filterSkeletonRefs(children []blockymodel.Node, accessoryID string) []blockymodel.Node {
 	var filtered []blockymodel.Node
 	for i := range children {
 		child := &children[i]
-		if child.IsSkeletonReference() || m.isAttachmentPoint(child) {
+		if child.Name == blockymodel.HeldItemNodeName {
+			filtered = append(filtered, *child) // held items keep their own rig
+		} else if child.IsSkeletonReference() || m.isAttachmentPoint(child) {
 			// This is a skeleton ref - process its children but don't add the ref itself
 			baseNode := findNodeByName(m.base.Nodes, child.Name)
 			if baseNode != nil {

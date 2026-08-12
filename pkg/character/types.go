@@ -27,6 +27,60 @@ type CharacterData struct {
 	Cape               *string `json:"cape"`
 }
 
+// fieldSlot pairs a config field's registry name with a pointer to the struct
+// field itself, so callers can both inspect and fill the slot.
+type fieldSlot struct {
+	name string
+	ptr  **string
+}
+
+// fieldSlots lists every accessory slot except bodyCharacteristic, which
+// carries skin-tone semantics and is handled separately by each caller.
+func (c *CharacterData) fieldSlots() []fieldSlot {
+	return []fieldSlot{
+		{"face", &c.Face},
+		{"ears", &c.Ears},
+		{"eyes", &c.Eyes},
+		{"eyebrows", &c.Eyebrows},
+		{"mouth", &c.Mouth},
+		{"facialHair", &c.FacialHair},
+		{"haircut", &c.Haircut},
+		{"underwear", &c.Underwear},
+		{"pants", &c.Pants},
+		{"overpants", &c.Overpants},
+		{"undertop", &c.Undertop},
+		{"overtop", &c.Overtop},
+		{"shoes", &c.Shoes},
+		{"gloves", &c.Gloves},
+		{"cape", &c.Cape},
+		{"headAccessory", &c.HeadAccessory},
+		{"faceAccessory", &c.FaceAccessory},
+		{"earAccessory", &c.EarAccessory},
+		{"skinFeature", &c.SkinFeature},
+	}
+}
+
+// Clone returns a deep copy of c: Sanitize or ApplyDefaults on the copy
+// leaves the original untouched.
+func (c *CharacterData) Clone() *CharacterData {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	for _, f := range out.fieldSlots() {
+		if *f.ptr != nil {
+			v := **f.ptr
+			*f.ptr = &v
+		}
+	}
+	// fieldSlots omits bodyCharacteristic; copy it explicitly.
+	if out.BodyCharacteristic != nil {
+		v := *out.BodyCharacteristic
+		out.BodyCharacteristic = &v
+	}
+	return &out
+}
+
 // AccessorySpec holds the parsed parts of an accessory string
 type AccessorySpec struct {
 	ID      string // e.g., "Scavenger_Hair"

@@ -34,7 +34,7 @@ func FlattenSubtree(model *blockymodel.BlockyModel, rootName string) []Face {
 // HeldItemNodeName is the node name the auto-fit framing excludes: anything
 // attached to the character as a held item must be wrapped in a node with
 // this name so full-body framing stays identical with and without it.
-const HeldItemNodeName = "HeldItem"
+const HeldItemNodeName = blockymodel.HeldItemNodeName
 
 // FlattenExcluding flattens all geometry except the named node's subtree.
 // Useful for framing a camera on the character while ignoring attachments

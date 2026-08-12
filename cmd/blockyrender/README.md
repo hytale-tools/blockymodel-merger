@@ -19,8 +19,10 @@ blockyrender -model some.blockymodel -texture some_Texture.png -view headshot -o
 Flags: `-view` (full-body, headshot, bust, iso-head, isometric, front-right,
 front-left, back-right, back-left), `-rotation N` (rotate the character by N
 degrees), `-size`/`-width`/`-height`, `-persp` (perspective variant of
-bust/iso-head views), `-bilinear`, `-light`, `-no-tint`, `-threads N`
-(0=auto/NumCPU, 1=single-threaded), `-bench N` (render N times, report avg).
+bust/iso-head views), `-bilinear`, `-light`, `-no-tint`, `-no-defaults` (do
+not fill empty required slots like face/eyes/underwear with the game's
+defaults), `-threads N` (0=auto/NumCPU, 1=single-threaded), `-bench N` (render
+N times, report avg).
 
 `full-body` and `headshot` use a 30-degree perspective camera auto-fit to the
 model's bounding box (full body, or the Head subtree for headshots) with a

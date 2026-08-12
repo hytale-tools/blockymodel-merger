@@ -115,3 +115,66 @@ func UpdateTextureOffsets(nodes []Node, nodeIDs map[string]bool, offset AtlasOff
 		UpdateTextureOffsets(node.Children, nodeIDs, offset)
 	}
 }
+
+// HeldItemNodeName is the group node every held item is wrapped in. It marks
+// the boundary between the character and what it is carrying.
+const HeldItemNodeName = "HeldItem"
+
+// HeldItemNodePrefix namespaces every node inside a held item. Item models
+// bring their own authoring rig, and those bone names collide with the
+// character's - a severed-head item model has its own Head, Chest, Belly and
+// arm bones, i.e. most of what a carry animation drives. Consumers that bind
+// animation tracks to nodes by name (the GLB exporter's output ends up in
+// exactly such players) would otherwise drive the item's internals as if they
+// were the character's skeleton. The prefix makes that impossible without the
+// consumer having to know about the HeldItem boundary at all.
+const HeldItemNodePrefix = "HeldItem."
+
+// HideSubtrees strips the geometry from every node named in names and from
+// everything below it, and reports the names that matched nothing.
+//
+// The nodes themselves are kept, with their positions, orientations and shape
+// offsets intact: hiding a bone must not move what hangs off it (hiding "Head"
+// still leaves any head-parented attachment bone where it was). Only the shape
+// type is cleared, which is what the renderer and the GLB exporter key on to
+// emit a mesh.
+//
+// The held-item subtree is never touched: an item model carries its own
+// authoring rig, whose bone names collide with the character's (a severed-head
+// item model is rooted at a node called "Head"), so hiding a body part must
+// not reach into the thing the character is holding.
+func HideSubtrees(nodes []Node, names []string) []string {
+	matched := make(map[string]bool, len(names))
+	wanted := make(map[string]bool, len(names))
+	for _, n := range names {
+		wanted[n] = true
+	}
+	hideNodes(nodes, wanted, matched, false)
+
+	var unmatched []string
+	for _, n := range names {
+		if !matched[n] {
+			unmatched = append(unmatched, n)
+		}
+	}
+	return unmatched
+}
+
+func hideNodes(nodes []Node, wanted, matched map[string]bool, inside bool) {
+	for i := range nodes {
+		node := &nodes[i]
+		if node.Name == HeldItemNodeName {
+			continue
+		}
+		hide := inside
+		if wanted[node.Name] {
+			matched[node.Name] = true
+			hide = true
+		}
+		if hide && node.Shape != nil {
+			node.Shape.Type = "none"
+			node.Shape.TextureLayout = nil
+		}
+		hideNodes(node.Children, wanted, matched, hide)
+	}
+}

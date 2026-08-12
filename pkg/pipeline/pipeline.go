@@ -3,7 +3,10 @@
 package pipeline
 
 import (
+	"fmt"
 	"image"
+	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/hytale-tools/blockymodel-merger/pkg/anim"
@@ -21,15 +24,35 @@ const (
 	BaseTexturePath = "assets/Characters/Player_Textures/Player_Greyscale.png"
 )
 
-// Result holds a fully merged character ready to render or export.
+// Result holds a fully merged character ready to render or export, plus the
+// diagnostics produced while building it.
 type Result struct {
 	Model *blockymodel.BlockyModel
 	Atlas *texture.Atlas // may be nil if texturing was skipped
+
+	// Character is the effective config that was built: the caller's input
+	// after defaulting (Options.ApplyDefaults) and Sanitize repairs. The
+	// input CharacterData is never modified.
+	Character *character.CharacterData
+
+	// Issues are the repairs Sanitize made to invalid config values.
+	Issues []character.ValidationIssue
+
+	// Warnings are non-fatal problems: accessories that could not be
+	// resolved, textures that failed to load, a missing carry pose, or a
+	// failed atlas pack. The build proceeded without the affected part.
+	Warnings []string
 }
 
 // Options controls optional pipeline stages beyond the plain merge.
 type Options struct {
 	NoTint bool
+
+	// ApplyDefaults fills required slots that are nil or empty (face, eyes,
+	// underwear, ...) with the registry's IsDefaultAsset entries before
+	// sanitizing. Off by default so embedders opt in explicitly; the CLIs
+	// enable it unless -no-defaults is passed.
+	ApplyDefaults bool
 
 	// HoldBlock attaches the named block (a Server/Item item ID with a
 	// BlockType, e.g. "Soil_Grass") to the character's hand attachment bone.
@@ -40,8 +63,27 @@ type Options struct {
 	// about X, Y, Z. Nil leaves the item in its authored orientation.
 	HoldRotate *[3]float64
 
+	// HoldOffset is an optional extra translation for the held item, in model
+	// units within the hand attachment frame. Nil grafts the item at the
+	// attachment origin, which is right for models authored around their own
+	// origin and wrong for ones that are not (a player-head item model keeps
+	// the character rig it was cut from, so its geometry sits well above the
+	// model origin).
+	HoldOffset *[3]float64
+
+	// HoldScale multiplies the held item's own scale. Zero means no extra
+	// scaling. Use it to size an item to the pose that carries it - the
+	// carry pose's grip is authored for a one-block item.
+	HoldScale float64
+
 	// Pose applies frame 0 of a .blockyanim file as a static pose.
+	// Precedence: PoseAnim > Pose > NoPose > held-block carry pose.
 	Pose string
+
+	// PoseAnim is a pre-parsed pose applied as Pose would be. It takes
+	// precedence over Pose and over the default carry pose of a held block.
+	// Lets a long-lived embedder parse its pose set once at startup.
+	PoseAnim *anim.Animation
 
 	// NoPose leaves the skeleton in bind pose, suppressing the default carry
 	// pose of a held block. Use for exports that will be animated at runtime:
@@ -53,6 +95,13 @@ type Options struct {
 	// layout (Common/ + Server/). They take priority over the base game data
 	// when resolving blocks and their textures.
 	Packs []string
+
+	// Hide names merged nodes whose geometry is dropped, along with the
+	// geometry of everything under them - e.g. []string{"Head"} renders the
+	// character headless (head, face, hair and any head accessory), which is
+	// what a "carrying your own head" render needs. The bones stay in place,
+	// so nothing else moves. Names that match no node produce a warning.
+	Hide []string
 }
 
 // Builder builds merged characters while caching everything immutable across
@@ -66,17 +115,41 @@ type Builder struct {
 	gradientSets *texture.GradientSets
 	reg          *registry.Registry
 	base         *blockymodel.BlockyModel
+	logger       *slog.Logger
 
 	mu     sync.RWMutex
 	models map[string]*blockymodel.BlockyModel // accessory path -> parsed model
 	images map[string]image.Image              // tint key -> tinted image
+	blocks map[string]*blocks.Definition       // held-block cache, key: id + pack set
+	anims  map[string]*anim.Animation          // pose cache, key: file path
+}
+
+// BuilderOption configures a Builder at construction.
+type BuilderOption func(*Builder)
+
+// WithLogger routes the Builder's log output to l instead of the global
+// util.Logger. Build-scoped diagnostics are returned on Result (see
+// Result.Issues and Result.Warnings), so this covers only residual logging.
+func WithLogger(l *slog.Logger) BuilderOption {
+	return func(b *Builder) { b.logger = l }
 }
 
 // NewBuilder loads the registry, gradient sets, and base player model.
-func NewBuilder() (*Builder, error) {
+func NewBuilder(opts ...BuilderOption) (*Builder, error) {
+	b := &Builder{
+		logger: util.Logger,
+		models: make(map[string]*blockymodel.BlockyModel),
+		images: make(map[string]image.Image),
+		blocks: make(map[string]*blocks.Definition),
+		anims:  make(map[string]*anim.Animation),
+	}
+	for _, opt := range opts {
+		opt(b)
+	}
+
 	gradientSets, err := texture.LoadGradientSets()
 	if err != nil {
-		util.Logger.Warn("Could not load gradient sets", "error", err)
+		b.logger.Warn("Could not load gradient sets", "error", err)
 	}
 
 	reg, err := registry.Load()
@@ -86,16 +159,13 @@ func NewBuilder() (*Builder, error) {
 
 	base, err := blockymodel.Load(BasePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("base player model: %w", err)
 	}
 
-	return &Builder{
-		gradientSets: gradientSets,
-		reg:          reg,
-		base:         base,
-		models:       make(map[string]*blockymodel.BlockyModel),
-		images:       make(map[string]image.Image),
-	}, nil
+	b.gradientSets = gradientSets
+	b.reg = reg
+	b.base = base
+	return b, nil
 }
 
 // BuildFile builds a character from a config file path.
@@ -107,26 +177,36 @@ func (b *Builder) BuildFile(charFile string, opts Options) (*Result, error) {
 	return b.Build(charData, opts)
 }
 
-// Build sanitizes the character config, merges all resolved accessories onto
-// the base player model, tints the textures, packs an atlas, and rewrites the
-// merged model's texture-layout offsets into atlas space. Invalid config
-// values are repaired in place and logged.
+// Build sanitizes a copy of the character config, merges all resolved
+// accessories onto the base player model, tints the textures, packs an atlas,
+// and rewrites the merged model's texture-layout offsets into atlas space.
+// The caller's CharacterData is never modified; the effective config and all
+// diagnostics come back on the Result.
+//
+// Errors can be classified with errors.Is for status-code mapping:
+// registry.ErrNotFound, blocks.ErrNotFound, and blocks.ErrNotRenderable mean
+// bad caller input; registry.ErrRegistryUnavailable, blocks.ErrSourcesUnavailable,
+// and fs.ErrNotExist from NewBuilder mean the deployment is missing assets.
 //
 // This mirrors the orchestration in cmd/blockymerge so a render and a GLB
 // export of the same character share identical geometry and texture
 // coordinates.
 func (b *Builder) Build(charData *character.CharacterData, opts Options) (*Result, error) {
-	for _, issue := range charData.Sanitize(b.reg, b.gradientSets) {
-		util.Logger.Warn("Invalid character value", "issue", issue.String())
+	charData = charData.Clone()
+	if opts.ApplyDefaults {
+		charData.ApplyDefaults(b.reg, b.gradientSets)
+	}
+
+	res := &Result{
+		Character: charData,
+		Issues:    charData.Sanitize(b.reg, b.gradientSets),
 	}
 
 	resolved, err := charData.ResolveAccessories(b.reg)
 	if err != nil {
 		return nil, err
 	}
-	for _, warn := range resolved.Warnings {
-		util.Logger.Warn("Accessory warning", "message", warn)
-	}
+	res.Warnings = append(res.Warnings, resolved.Warnings...)
 
 	m, err := merger.New(b.base)
 	if err != nil {
@@ -149,7 +229,7 @@ func (b *Builder) Build(charData *character.CharacterData, opts Options) (*Resul
 	var heldBlock *blocks.Definition
 	var heldTexture image.Image
 	if opts.HoldBlock != "" {
-		heldBlock, err = blocks.Find(opts.HoldBlock, blocks.Sources(opts.Packs))
+		heldBlock, err = b.heldBlock(opts.HoldBlock, opts.Packs)
 		if err != nil {
 			return nil, err
 		}
@@ -158,7 +238,13 @@ func (b *Builder) Build(charData *character.CharacterData, opts Options) (*Resul
 			q := blocks.EulerToQuaternion(opts.HoldRotate[0], opts.HoldRotate[1], opts.HoldRotate[2])
 			rotate = &q
 		}
-		heldModel, heldTex, err := heldBlock.BuildHeld(rotate)
+		var offset *blockymodel.Vec3
+		if opts.HoldOffset != nil {
+			offset = &blockymodel.Vec3{X: opts.HoldOffset[0], Y: opts.HoldOffset[1], Z: opts.HoldOffset[2]}
+		}
+		heldModel, heldTex, err := heldBlock.BuildHeld(blocks.HeldTransform{
+			Rotate: rotate, Offset: offset, Scale: opts.HoldScale,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -169,22 +255,38 @@ func (b *Builder) Build(charData *character.CharacterData, opts Options) (*Resul
 	}
 
 	model := m.Result()
+	res.Model = model
 
-	if pose := resolvePose(opts, heldBlock); pose != "" {
-		poseAnim, err := anim.Load(pose)
-		if err != nil {
-			return nil, err
+	// Hide after merging so a hidden bone takes its accessories with it (the
+	// haircut and head accessories merge into the Head subtree).
+	if len(opts.Hide) > 0 {
+		for _, name := range blockymodel.HideSubtrees(model.Nodes, opts.Hide) {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("no node named %q to hide", name))
 		}
-		poseAnim.ApplyPose(model)
 	}
 
-	res := &Result{Model: model}
+	poseAnim := opts.PoseAnim
+	if poseAnim == nil {
+		posePath, warn := resolvePose(opts, heldBlock)
+		if warn != "" {
+			res.Warnings = append(res.Warnings, warn)
+		}
+		if posePath != "" {
+			if poseAnim, err = b.anim(posePath); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if poseAnim != nil {
+		poseAnim.ApplyPose(model)
+	}
 
 	if opts.NoTint {
 		return res, nil
 	}
 
-	tintedTextures := b.tintedTextures(charData, resolved)
+	tintedTextures, warnings := b.tintedTextures(charData, resolved)
+	res.Warnings = append(res.Warnings, warnings...)
 	if heldTexture != nil {
 		tintedTextures = append(tintedTextures, &texture.TintedTexture{Name: blocks.AtlasKey, Image: heldTexture})
 	}
@@ -194,7 +296,7 @@ func (b *Builder) Build(charData *character.CharacterData, opts Options) (*Resul
 
 	atlas, err := texture.PackAtlasSimple(tintedTextures, 1)
 	if err != nil {
-		util.Logger.Warn("Failed to pack atlas", "error", err)
+		res.Warnings = append(res.Warnings, fmt.Sprintf("failed to pack atlas: %v", err))
 		return res, nil
 	}
 	res.Atlas = atlas
@@ -262,32 +364,86 @@ func (b *Builder) image(key string, load func() (image.Image, error)) (image.Ima
 	return img, nil
 }
 
+// heldBlock returns the block definition for id, resolving it on first use.
+// Packs are part of the cache key: the same id can resolve differently under
+// different mod packs, so a bare-id key would leak a modded block into an
+// unmodded build. BuildHeld does not mutate the definition, so it is shared.
+func (b *Builder) heldBlock(id string, packs []string) (*blocks.Definition, error) {
+	key := blockCacheKey(id, packs)
+
+	b.mu.RLock()
+	cached, ok := b.blocks[key]
+	b.mu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	def, err := blocks.Find(id, blocks.Sources(packs))
+	if err != nil {
+		return nil, err
+	}
+
+	b.mu.Lock()
+	b.blocks[key] = def
+	b.mu.Unlock()
+	return def, nil
+}
+
+// blockCacheKey joins id and packs with NUL, which cannot appear in item IDs
+// or paths, so distinct (id, packs) pairs never collide.
+func blockCacheKey(id string, packs []string) string {
+	return id + "\x00" + strings.Join(packs, "\x00")
+}
+
+// anim returns the parsed .blockyanim at path, loading it on first use.
+// ApplyPose mutates only the target model, so a cached Animation is shared.
+func (b *Builder) anim(path string) (*anim.Animation, error) {
+	b.mu.RLock()
+	cached, ok := b.anims[path]
+	b.mu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	a, err := anim.Load(path)
+	if err != nil {
+		return nil, err
+	}
+
+	b.mu.Lock()
+	b.anims[path] = a
+	b.mu.Unlock()
+	return a, nil
+}
+
 // resolvePose picks the pose file: an explicit Pose always wins; NoPose only
-// suppresses the default carry pose of a held block.
-func resolvePose(opts Options, heldBlock *blocks.Definition) string {
+// suppresses the default carry pose of a held block. A non-empty warning
+// means the held block's carry pose could not be found and the character
+// renders unposed.
+func resolvePose(opts Options, heldBlock *blocks.Definition) (string, string) {
 	if opts.Pose != "" {
-		return opts.Pose
+		return opts.Pose, ""
 	}
 	if opts.NoPose {
-		return ""
+		return "", ""
 	}
 	if heldBlock != nil {
 		pose, err := heldBlock.CarryPose()
 		if err != nil {
-			util.Logger.Warn("Carry pose not found; rendering unposed",
-				"block", heldBlock.ID, "animationSet", heldBlock.AnimationsID, "error", err)
-			return ""
+			return "", fmt.Sprintf("carry pose for block %q (animation set %q) not found, rendering unposed: %v",
+				heldBlock.ID, heldBlock.AnimationsID, err)
 		}
-		return pose
+		return pose, ""
 	}
-	return ""
+	return "", ""
 }
 
 func (b *Builder) tintedTextures(
 	charData *character.CharacterData,
 	resolved *character.ResolveResult,
-) []*texture.TintedTexture {
+) ([]*texture.TintedTexture, []string) {
 	var tinted []*texture.TintedTexture
+	var warnings []string
 
 	// Base player texture (skin-toned).
 	skinTone := charData.GetSkinTone()
@@ -302,7 +458,7 @@ func (b *Builder) tintedTextures(
 		return t.Image, nil
 	})
 	if err != nil {
-		util.Logger.Warn("Could not load base texture", "error", err)
+		warnings = append(warnings, fmt.Sprintf("could not load base texture: %v", err))
 	} else {
 		tinted = append(tinted, &texture.TintedTexture{Name: "_base", Image: baseImg, OriginalPath: BaseTexturePath})
 	}
@@ -319,7 +475,7 @@ func (b *Builder) tintedTextures(
 				return texture.LoadImage(path)
 			})
 			if err != nil {
-				util.Logger.Warn("Failed to load direct texture", "id", acc.Spec.ID, "error", err)
+				warnings = append(warnings, fmt.Sprintf("failed to load direct texture for %s: %v", acc.Spec.ID, err))
 				continue
 			}
 			tinted = append(tinted, &texture.TintedTexture{Name: acc.Key(), Image: img, OriginalPath: path})
@@ -335,14 +491,14 @@ func (b *Builder) tintedTextures(
 				return t.Image, nil
 			})
 			if err != nil {
-				util.Logger.Warn("Failed to process accessory texture", "id", acc.Spec.ID, "error", err)
+				warnings = append(warnings, fmt.Sprintf("failed to process accessory texture for %s: %v", acc.Spec.ID, err))
 				continue
 			}
 			tinted = append(tinted, &texture.TintedTexture{Name: acc.Key(), Image: img, OriginalPath: path})
 		}
 	}
 
-	return tinted
+	return tinted, warnings
 }
 
 func applyAtlasOffsets(model *blockymodel.BlockyModel, m *merger.Merger, atlas *texture.Atlas, tinted []*texture.TintedTexture) {
