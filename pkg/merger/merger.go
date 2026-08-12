@@ -46,7 +46,7 @@ func New(base *blockymodel.BlockyModel) (*Merger, error) {
 // accessoryID is used to track which accessory each merged node came from (for texture offset updates)
 func (m *Merger) Merge(accessory *blockymodel.BlockyModel, accessoryID string) error {
 	for i := range accessory.Nodes {
-		if err := m.mergeNode(&accessory.Nodes[i], accessoryID); err != nil {
+		if err := m.mergeNode(&accessory.Nodes[i], accessoryID, nil); err != nil {
 			return err
 		}
 	}
@@ -58,17 +58,24 @@ func (m *Merger) Result() *blockymodel.BlockyModel {
 	return m.base
 }
 
-// mergeNode processes a single accessory node
-func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) error {
+// mergeNode processes a single accessory node. parent is the base-model node
+// the accessory subtree is being attached under (nil at the top level); an
+// unmatched attachment reference is added there rather than dropped.
+func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string, parent *blockymodel.Node) error {
 	// Check if this node matches a bone in the base model (either skeleton ref or by name)
 	baseNode := findNodeByName(m.base.Nodes, accessoryNode.Name)
 
 	if accessoryNode.IsSkeletonReference() || (baseNode != nil && accessoryNode.Shape != nil && accessoryNode.Shape.Type == "none") {
 		// This is an attachment point - attach children to base model
 		if baseNode == nil {
-			util.Logger.Warn("No matching attachment point found in base model",
-				"node", accessoryNode.Name)
-			return nil
+			// The game adds unmatched attachment nodes to the model
+			// instead of dropping them. Routine, not an error: a cosmetic can
+			// provide sockets for later cosmetics (Default ears carries
+			// R/L-Ear-EarAccessory for earrings), and an accessory can bring
+			// its own socket (DoubleEarrings' Tilt socket on Default ears).
+			util.Logger.Debug("No matching attachment point in base model, adding node",
+				"node", accessoryNode.Name, "accessory", accessoryID)
+			return m.addUnmatchedNode(accessoryNode, parent, accessoryID)
 		}
 
 		// Copy non-skeleton children (geometry) to the base node
@@ -93,7 +100,7 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) 
 				baseNode.Children = append(baseNode.Children, *cloned)
 			} else {
 				// Recurse into skeleton reference children
-				if err := m.mergeNode(child, accessoryID); err != nil {
+				if err := m.mergeNode(child, accessoryID, baseNode); err != nil {
 					return err
 				}
 			}
@@ -101,10 +108,28 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string) 
 	} else {
 		// Non-skeleton reference nodes at top level: recursively process children
 		for i := range accessoryNode.Children {
-			if err := m.mergeNode(&accessoryNode.Children[i], accessoryID); err != nil {
+			if err := m.mergeNode(&accessoryNode.Children[i], accessoryID, parent); err != nil {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// addUnmatchedNode clones an attachment-reference node that has no counterpart
+// in the base model and adds it under parent (or as a new root when parent is
+// nil), so later accessories can attach to it by name.
+func (m *Merger) addUnmatchedNode(node *blockymodel.Node, parent *blockymodel.Node, accessoryID string) error {
+	cloned, err := blockymodel.CloneNode(node)
+	if err != nil {
+		return fmt.Errorf("failed to clone node %s: %w", node.Name, err)
+	}
+	cloned.Children = m.filterSkeletonRefs(cloned.Children, accessoryID)
+	m.reIDNode(cloned, accessoryID)
+	if parent != nil {
+		parent.Children = append(parent.Children, *cloned)
+	} else {
+		m.base.Nodes = append(m.base.Nodes, *cloned)
 	}
 	return nil
 }
@@ -147,11 +172,16 @@ func (m *Merger) filterSkeletonRefs(children []blockymodel.Node, accessoryID str
 						}
 					} else {
 						// Recurse into nested skeleton refs
-						m.mergeNode(grandchild, accessoryID)
+						m.mergeNode(grandchild, accessoryID, baseNode)
 					}
 				}
+			} else {
+				// Unmatched ref - keep it in place so later accessories can
+				// attach to it by name (see addUnmatchedNode).
+				cloned := *child
+				cloned.Children = m.filterSkeletonRefs(child.Children, accessoryID)
+				filtered = append(filtered, cloned)
 			}
-			// Don't add the skeleton ref node itself
 		} else {
 			// Not a skeleton ref - add it but filter its children too
 			cloned := *child
