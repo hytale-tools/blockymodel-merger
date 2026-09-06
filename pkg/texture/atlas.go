@@ -124,6 +124,10 @@ func tryPackTight(textures []*TintedTexture, width, height, padding int) *Atlas 
 	}
 
 	// Create atlas with tight bounds (no wasted space)
+	// Pad the canvas so the exported texture satisfies Hytale's 32px
+	// alignment rule. Entries keep their pixel positions, so padding on the
+	// bottom/right edge never shifts any offsets.
+	maxX, maxY = alignSize(maxX), alignSize(maxY)
 	atlas := &Atlas{
 		Image:   image.NewRGBA(image.Rect(0, 0, maxX, maxY)),
 		Entries: entries,
@@ -139,6 +143,18 @@ func tryPackTight(textures []*TintedTexture, width, height, padding int) *Atlas 
 	}
 
 	return atlas
+}
+
+// TextureAlignment is the pixel granularity Hytale requires for model
+// textures: width and height must be multiples of 32 and at least 32.
+const TextureAlignment = 32
+
+// alignSize rounds n up to the next multiple of TextureAlignment (min 32).
+func alignSize(n int) int {
+	if n < TextureAlignment {
+		return TextureAlignment
+	}
+	return (n + TextureAlignment - 1) / TextureAlignment * TextureAlignment
 }
 
 func nextPowerOf2(n int) int {
@@ -243,6 +259,10 @@ func PackAtlasSimple(textures []*TintedTexture, padding int) (*Atlas, error) {
 	totalHeight := currentY + rowHeight
 
 	// Create atlas image
+	// Pad the canvas so the exported texture satisfies Hytale's 32px
+	// alignment rule. Entries keep their pixel positions, so padding on the
+	// bottom/right edge never shifts any offsets.
+	maxWidth, totalHeight = alignSize(maxWidth), alignSize(totalHeight)
 	atlas := &Atlas{
 		Image:   image.NewRGBA(image.Rect(0, 0, maxWidth, totalHeight)),
 		Entries: entries,
@@ -349,6 +369,10 @@ func tryPackWithBase(baseTex *TintedTexture, remaining []*TintedTexture, targetW
 	}
 
 	// Create atlas with tight bounds
+	// Pad the canvas so the exported texture satisfies Hytale's 32px
+	// alignment rule. Entries keep their pixel positions, so padding on the
+	// bottom/right edge never shifts any offsets.
+	maxX, maxY = alignSize(maxX), alignSize(maxY)
 	atlas := &Atlas{
 		Image:   image.NewRGBA(image.Rect(0, 0, maxX, maxY)),
 		Entries: entries,
