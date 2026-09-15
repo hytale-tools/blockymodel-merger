@@ -37,7 +37,7 @@ type Shape struct {
 	Offset        *Vec3                    `json:"offset,omitempty"`
 	Stretch       *Vec3                    `json:"stretch,omitempty"`
 	Settings      map[string]interface{}   `json:"settings,omitempty"`
-	TextureLayout map[string]TextureFace   `json:"textureLayout,omitempty"`
+	TextureLayout map[string]TextureFace   `json:"textureLayout"`
 	UnwrapMode    string                   `json:"unwrapMode,omitempty"`
 	Visible       *bool                    `json:"visible,omitempty"`
 	DoubleSided   *bool                    `json:"doubleSided,omitempty"`

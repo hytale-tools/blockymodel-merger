@@ -35,6 +35,19 @@ func Save(model *BlockyModel, path string) error {
 	return nil
 }
 
+// MarshalJSON always writes the textureLayout key. Hytale's own assets carry
+// "textureLayout": {} on every shape, faces or not, and the game client fails
+// to load a model whose box or quad omits the key entirely. Go's omitempty
+// would drop an empty map, so the key is forced to an empty object instead.
+func (s Shape) MarshalJSON() ([]byte, error) {
+	type shape Shape
+	out := shape(s)
+	if out.TextureLayout == nil {
+		out.TextureLayout = map[string]TextureFace{}
+	}
+	return json.Marshal(out)
+}
+
 // Clone creates a deep copy of a BlockyModel
 func Clone(model *BlockyModel) (*BlockyModel, error) {
 	cloned := &BlockyModel{
