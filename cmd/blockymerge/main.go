@@ -62,6 +62,7 @@ func main() {
 	var accessoryPaths []character.AccessoryPath
 	var gradientSets *texture.GradientSets
 	var charData *character.CharacterData
+	bodyTexturePath := baseTexturePath
 
 	// Determine input mode
 	if *charFile != "" {
@@ -118,6 +119,7 @@ func main() {
 		}
 
 		accessoryPaths = result.Accessories
+		bodyTexturePath = charData.BodyTexture(reg, baseTexturePath)
 	} else {
 		// Direct paths from command line
 		args := flag.Args()
@@ -268,7 +270,7 @@ func main() {
 			util.Logger.Info("Tinting base with skin tone", "skinTone", skinTone)
 			baseTinted, err := texture.ProcessAccessoryTexture(
 				"_base",
-				baseTexturePath,
+				bodyTexturePath,
 				"Skin",
 				skinTone,
 				gradientSets,
@@ -283,14 +285,14 @@ func main() {
 			}
 		} else {
 			// No skin tone - load base texture without tinting
-			baseImg, err := texture.LoadImage(baseTexturePath)
+			baseImg, err := texture.LoadImage(bodyTexturePath)
 			if err != nil {
 				util.Logger.Warn("Could not load base texture", "error", err)
 			} else {
 				baseTex := &texture.TintedTexture{
 					Name:         "_base",
 					Image:        baseImg,
-					OriginalPath: baseTexturePath,
+					OriginalPath: bodyTexturePath,
 				}
 				util.Logger.Info("Base texture loaded (no skin tone)",
 					"width", baseImg.Bounds().Dx(),
