@@ -56,8 +56,7 @@ func (c *CharacterData) check(reg *registry.Registry, gradients GradientChecker,
 			continue
 		}
 		value := *f.ptr
-		spec := ParseAccessorySpec(*value)
-		changed := false
+		spec, changed := canonicalSpec(reg, f.name, ParseAccessorySpec(*value))
 
 		entry, err := reg.GetEntry(f.name, spec.ID)
 		if errors.Is(err, registry.ErrRegistryUnavailable) {
@@ -133,6 +132,15 @@ func (c *CharacterData) check(reg *registry.Registry, gradients GradientChecker,
 	}
 
 	return issues
+}
+
+// canonicalSpec swaps a retired accessory ID for its replacement (see
+// registry.Canonical), reporting whether it did. Migrating is what the game
+// does with the same saved value, so it is not a validation issue.
+func canonicalSpec(reg *registry.Registry, fieldType string, spec AccessorySpec) (AccessorySpec, bool) {
+	var migrated bool
+	spec.ID, spec.Variant, migrated = reg.Canonical(fieldType, spec.ID, spec.Variant)
+	return spec, migrated
 }
 
 // formatSpec rebuilds the "ID.Color.Variant" config string.
