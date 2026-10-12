@@ -1,5 +1,7 @@
 assets/
+assets-old/
 data/
+data-old/
 old/
 output/
 node_modules/
