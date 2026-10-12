@@ -67,7 +67,7 @@ func (c *CharacterData) ResolveAccessories(reg *registry.Registry) (*ResolveResu
 			return
 		}
 
-		spec := ParseAccessorySpec(*value)
+		spec, _ := canonicalSpec(reg, accessoryType, ParseAccessorySpec(*value))
 
 		// Look up in registry with variant support
 		path, err := reg.LookupWithVariant(accessoryType, spec.ID, spec.Variant)
@@ -121,7 +121,7 @@ func (c *CharacterData) ResolveAccessories(reg *registry.Registry) (*ResolveResu
 	// Check headAccessory type before adding haircut
 	headAccessoryEntry := (*registry.AccessoryEntry)(nil)
 	if c.HeadAccessory != nil && *c.HeadAccessory != "" {
-		spec := ParseAccessorySpec(*c.HeadAccessory)
+		spec, _ := canonicalSpec(reg, "headAccessory", ParseAccessorySpec(*c.HeadAccessory))
 		entry, _ := reg.GetEntry("headAccessory", spec.ID)
 		headAccessoryEntry = entry
 	}
@@ -131,7 +131,7 @@ func (c *CharacterData) ResolveAccessories(reg *registry.Registry) (*ResolveResu
 	if headAccessoryEntry == nil || headAccessoryEntry.HeadAccessoryType != "FullyCovering" {
 		if headAccessoryEntry != nil && headAccessoryEntry.HeadAccessoryType == "HalfCovering" && c.Haircut != nil && *c.Haircut != "" {
 			// HalfCovering: check if haircut requires generic
-			haircutSpec := ParseAccessorySpec(*c.Haircut)
+			haircutSpec, _ := canonicalSpec(reg, "haircut", ParseAccessorySpec(*c.Haircut))
 			haircutEntry, _ := reg.GetEntry("haircut", haircutSpec.ID)
 			if haircutEntry != nil && haircutEntry.RequiresGenericHaircut && haircutEntry.HairType != "" {
 				// Use generic haircut instead

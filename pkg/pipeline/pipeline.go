@@ -447,11 +447,12 @@ func (b *Builder) tintedTextures(
 
 	// Base player texture (skin-toned).
 	skinTone := charData.GetSkinTone()
-	baseImg, err := b.image("base|"+skinTone, func() (image.Image, error) {
+	bodyTexture := charData.BodyTexture(b.reg, BaseTexturePath)
+	baseImg, err := b.image("base|"+bodyTexture+"|"+skinTone, func() (image.Image, error) {
 		if skinTone == "" {
-			return texture.LoadImage(BaseTexturePath)
+			return texture.LoadImage(bodyTexture)
 		}
-		t, err := texture.ProcessAccessoryTexture("_base", BaseTexturePath, "Skin", skinTone, b.gradientSets)
+		t, err := texture.ProcessAccessoryTexture("_base", bodyTexture, "Skin", skinTone, b.gradientSets)
 		if err != nil {
 			return nil, err
 		}
@@ -460,7 +461,7 @@ func (b *Builder) tintedTextures(
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("could not load base texture: %v", err))
 	} else {
-		tinted = append(tinted, &texture.TintedTexture{Name: "_base", Image: baseImg, OriginalPath: BaseTexturePath})
+		tinted = append(tinted, &texture.TintedTexture{Name: "_base", Image: baseImg, OriginalPath: bodyTexture})
 	}
 
 	// Accessory textures.

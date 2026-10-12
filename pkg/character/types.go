@@ -1,6 +1,10 @@
 package character
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/hytale-tools/blockymodel-merger/pkg/registry"
+)
 
 // CharacterData represents the full outfit/appearance of a character
 // Format for values: "AccessoryId.Color.Variant" where Color and Variant are optional
@@ -99,4 +103,19 @@ func (c *CharacterData) GetSkinTone() string {
 		return parts[1]
 	}
 	return ""
+}
+
+// BodyTexture returns the greyscale texture of the character's body
+// characteristic ("Muscular.04" uses Player_Muscular_Greyscale.png), or
+// fallback when the body is unset or the registry has no texture for it.
+func (c *CharacterData) BodyTexture(reg *registry.Registry, fallback string) string {
+	if c.BodyCharacteristic == nil || reg == nil {
+		return fallback
+	}
+	body := strings.SplitN(*c.BodyCharacteristic, ".", 2)[0]
+	tex, err := reg.ResolveTexture("bodyCharacteristic", body, "", "")
+	if err != nil || tex.GreyscaleTexture == "" {
+		return fallback
+	}
+	return tex.GreyscaleTexture
 }

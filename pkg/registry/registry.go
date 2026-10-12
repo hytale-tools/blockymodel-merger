@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/hytale-tools/blockymodel-merger/pkg/util"
@@ -27,6 +28,7 @@ type VariantEntry struct {
 	Model            string                  `json:"Model"`
 	GreyscaleTexture string                  `json:"GreyscaleTexture"`
 	Textures         map[string]TextureEntry `json:"Textures"` // For pre-colored textures
+	FallbackPartId   string                  `json:"FallbackPartId,omitempty"` // Retired entry ID this variant replaces
 }
 
 // AccessoryEntry represents an entry in a registry JSON file
@@ -39,6 +41,7 @@ type AccessoryEntry struct {
 	IsDefaultAsset   bool                    `json:"IsDefaultAsset,omitempty"` // Entry the game uses when the slot is unset
 	Variants         map[string]VariantEntry `json:"Variants"`
 	Textures         map[string]TextureEntry `json:"Textures"` // For pre-colored textures at top level
+	FallbackPartIds  []string                `json:"FallbackPartIds,omitempty"` // Retired entry IDs this entry replaces
 	
 	// HeadAccessory-specific fields
 	HeadAccessoryType string `json:"HeadAccessoryType,omitempty"` // "Simple", "HalfCovering", "FullyCovering"
@@ -72,8 +75,16 @@ var (
 type Registry struct {
 	entries    map[string]map[string]AccessoryEntry // registryName -> id -> entry
 	defaults   map[string]string                    // registryName -> ID of first IsDefaultAsset entry (file order)
+	aliases    map[string]map[string]alias          // registryName -> retired ID -> replacement
 	dataDir    string                                // Base path for data directory
 	assetsDir  string                                // Base path for assets directory
+}
+
+// alias is the replacement for a retired accessory ID: an entry, and for IDs
+// folded into another entry as one of its variants, that variant.
+type alias struct {
+	id      string
+	variant string
 }
 
 // Mapping from character data field names to registry file names
@@ -133,6 +144,7 @@ func Load(basePath ...string) (*Registry, error) {
 	r := &Registry{
 		entries: make(map[string]map[string]AccessoryEntry),
 		defaults: make(map[string]string),
+		aliases: make(map[string]map[string]alias),
 		dataDir: dataDir,
 		assetsDir: assetsDir,
 	}
@@ -163,6 +175,13 @@ func (r *Registry) loadRegistry(name, path string) error {
 	}
 
 	r.entries[name] = make(map[string]AccessoryEntry)
+	r.aliases[name] = make(map[string]alias)
+	addAlias := func(old string, to alias) {
+		// First claim in file order wins.
+		if _, ok := r.aliases[name][old]; old != "" && !ok {
+			r.aliases[name][old] = to
+		}
+	}
 	for _, entry := range entries {
 		if entry.ID != "" {
 			r.entries[name][entry.ID] = entry
@@ -171,6 +190,19 @@ func (r *Registry) loadRegistry(name, path string) error {
 				if _, ok := r.defaults[name]; !ok {
 					r.defaults[name] = entry.ID
 				}
+			}
+			for _, old := range entry.FallbackPartIds {
+				addAlias(old, alias{id: entry.ID})
+			}
+			// Sorted so a retired ID claimed by two variants resolves the
+			// same way every run.
+			variantNames := make([]string, 0, len(entry.Variants))
+			for v := range entry.Variants {
+				variantNames = append(variantNames, v)
+			}
+			sort.Strings(variantNames)
+			for _, v := range variantNames {
+				addAlias(entry.Variants[v].FallbackPartId, alias{id: entry.ID, variant: v})
 			}
 		}
 	}
@@ -189,6 +221,32 @@ func (r *Registry) DefaultFor(fieldType string) (string, bool) {
 	}
 	id, ok := r.defaults[registryName]
 	return id, ok
+}
+
+// Canonical maps a retired accessory ID to its replacement. The game renamed
+// and merged cosmetics over time, recording each retired ID on its successor:
+// an entry's FallbackPartIds (Mouth_Makeup -> Mouth_PronouncedLips), or a
+// variant's FallbackPartId when the old entry became a variant of another
+// (FloppyBunnyJersey -> Sweater's Bunny variant). Saved characters still carry
+// the old IDs. A replacement variant overrides the given one, which belonged
+// to the retired entry. IDs that are live entries, or unknown, come back
+// unchanged with migrated false.
+func (r *Registry) Canonical(fieldType, id, variant string) (newID, newVariant string, migrated bool) {
+	registryName, ok := fieldToRegistry[fieldType]
+	if !ok {
+		return id, variant, false
+	}
+	if _, live := r.entries[registryName][id]; live {
+		return id, variant, false
+	}
+	a, ok := r.aliases[registryName][id]
+	if !ok {
+		return id, variant, false
+	}
+	if a.variant != "" {
+		variant = a.variant
+	}
+	return a.id, variant, true
 }
 
 // LookupWithVariant finds an accessory by field type, ID, and optional variant

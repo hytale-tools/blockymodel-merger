@@ -54,3 +54,34 @@ func TestSentinelErrors(t *testing.T) {
 		t.Errorf("LookupWithVariant unloaded registry: got %v, want ErrRegistryUnavailable", err)
 	}
 }
+
+func TestCanonical(t *testing.T) {
+	r, err := Load("testdata")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	tests := []struct {
+		name                string
+		field, id, variant  string
+		wantID, wantVariant string
+		wantMigrated        bool
+	}{
+		{"entry fallback", "haircut", "Spikey", "", "Spiky", "", true},
+		{"entry fallback keeps variant", "haircut", "Spikey", "X", "Spiky", "X", true},
+		{"variant fallback", "haircut", "LongBraids", "", "Braids", "Long", true},
+		{"variant fallback overrides variant", "haircut", "LongBraids", "Old", "Braids", "Long", true},
+		{"live entry wins over fallback", "haircut", "Short", "", "Short", "", false},
+		{"unknown id", "haircut", "Nope", "", "Nope", "", false},
+		{"unloaded registry", "eyes", "Spikey", "", "Spikey", "", false},
+		{"unknown field", "bogus", "Spikey", "", "Spikey", "", false},
+	}
+	for _, tt := range tests {
+		id, variant, migrated := r.Canonical(tt.field, tt.id, tt.variant)
+		if id != tt.wantID || variant != tt.wantVariant || migrated != tt.wantMigrated {
+			t.Errorf("%s: Canonical(%q, %q, %q) = (%q, %q, %v), want (%q, %q, %v)",
+				tt.name, tt.field, tt.id, tt.variant, id, variant, migrated,
+				tt.wantID, tt.wantVariant, tt.wantMigrated)
+		}
+	}
+}
