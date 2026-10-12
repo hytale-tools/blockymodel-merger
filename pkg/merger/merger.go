@@ -3,6 +3,7 @@ package merger
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/hytale-tools/blockymodel-merger/pkg/blockymodel"
 	"github.com/hytale-tools/blockymodel-merger/pkg/util"
@@ -19,6 +20,11 @@ type Merger struct {
 	// nodes from matching against geometry containers that were added by a
 	// previously-merged accessory.
 	baseBoneNames map[string]bool
+	// IDs of every node in the ORIGINAL base: the nodes accessory geometry
+	// may bind to by name (see attachGeometry).
+	baseIDs map[string]bool
+	// Names of every node in the ORIGINAL base (see reIDNode).
+	baseNames map[string]bool
 }
 
 // New creates a new Merger with the given base model (deep copied)
@@ -33,12 +39,17 @@ func New(base *blockymodel.BlockyModel) (*Merger, error) {
 
 	boneNames := make(map[string]bool)
 	collectBoneNames(cloned.Nodes, boneNames)
+	baseIDs := make(map[string]bool)
+	baseNames := make(map[string]bool)
+	collectIDs(cloned.Nodes, baseIDs, baseNames)
 
 	return &Merger{
 		base:          cloned,
 		nextID:        maxID + 1,
 		NodeSources:   make(map[string]string),
 		baseBoneNames: boneNames,
+		baseIDs:       baseIDs,
+		baseNames:     baseNames,
 	}, nil
 }
 
@@ -89,18 +100,9 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string, 
 					return err
 				}
 			} else if !child.IsSkeletonReference() && !m.isAttachmentPoint(child) {
-				// Clone and re-ID the child, then append to base
-				cloned, err := blockymodel.CloneNode(child)
-				if err != nil {
-					return fmt.Errorf("failed to clone node %s: %w", child.Name, err)
-				}
-				// Filter out skeleton ref nodes from cloned children - they should only be attachment points
-				cloned.Children, err = m.filterSkeletonRefs(cloned.Children, accessoryID)
-				if err != nil {
+				if err := m.attachGeometry(baseNode, child, identityFrame, accessoryID); err != nil {
 					return err
 				}
-				m.reIDNode(cloned, accessoryID)
-				baseNode.Children = append(baseNode.Children, *cloned)
 			} else {
 				// Recurse into skeleton reference children
 				if err := m.mergeNode(child, accessoryID, baseNode); err != nil {
@@ -117,6 +119,125 @@ func (m *Merger) mergeNode(accessoryNode *blockymodel.Node, accessoryID string, 
 		}
 	}
 	return nil
+}
+
+// attachGeometry adds an accessory geometry node under baseNode, binding it to
+// the base node of the same name when baseNode has one. Cosmetics model the
+// body parts they cover as boxes named after the Player nodes they follow:
+// Stockings is a Pelvis box with R-Thigh, R-Calf and R-Foot boxes under it,
+// and Player's eyelid bones are empty until the face supplies their quads.
+// Copying such a subtree in as-is would leave a second, unanimated skeleton
+// beside the real one, so each named node is bound to its base counterpart:
+//
+//   - an empty base bone at the same place takes the node's shape directly
+//     (the eyelids), keeping one node per name;
+//   - otherwise the node's shape is added under the base node as an overlay
+//     (named "<node>-<accessory>"), placed so it keeps its rest position.
+//
+// Children are matched the same way one level down, against the base node's
+// children; whatever does not match rides along under the shape it hung off.
+// delta is the accessory parent's child frame expressed in baseNode's child
+// frame: identity at an attachment point, and whatever small mismatch the
+// authored parent had (Stockings' Pelvis is offset 0.5 lower than Player's)
+// further down.
+func (m *Merger) attachGeometry(baseNode, node *blockymodel.Node, delta frame, accessoryID string) error {
+	bone := m.originalChild(baseNode, node.Name)
+	if bone == nil {
+		cloned, err := blockymodel.CloneNode(node)
+		if err != nil {
+			return fmt.Errorf("failed to clone node %s: %w", node.Name, err)
+		}
+		// Filter out skeleton ref nodes from cloned children - they should only be attachment points
+		cloned.Children, err = m.filterSkeletonRefs(cloned.Children, accessoryID)
+		if err != nil {
+			return err
+		}
+		delta.mul(localFrame(cloned)).setOn(cloned)
+		m.reIDNode(cloned, accessoryID)
+		baseNode.Children = append(baseNode.Children, *cloned)
+		return nil
+	}
+
+	nodeFrame := delta.mul(localFrame(node))
+	var shape *blockymodel.Shape
+	if node.Shape != nil {
+		shape = node.Shape.Clone()
+	}
+
+	// The eyelid case: fill the empty bone in place.
+	fill := shape != nil && shape.Type != "none" &&
+		(bone.Shape == nil || bone.Shape.Type == "none") &&
+		childFrame(bone).inverse().mul(nodeFrame).isIdentity()
+	var overlay *blockymodel.Node
+	if fill {
+		bone.Shape = shape
+		// The shape keeps the accessory's UVs, so the bone's ID must map to
+		// the accessory for its atlas offset.
+		m.NodeSources[bone.ID] = accessoryID
+	} else {
+		overlay = &blockymodel.Node{Name: node.Name + "-" + overlaySuffix(accessoryID), Shape: shape}
+		childFrame(bone).inverse().mul(nodeFrame).setOn(overlay)
+	}
+
+	// The node's child frame, in the frame of whichever node now hosts its
+	// children: the bone (filled with the node's shape) or the overlay.
+	childDelta := childFrame(bone).inverse().mul(nodeFrame).mul(offsetFrame(node))
+	var rest []blockymodel.Node
+	for i := range node.Children {
+		child := &node.Children[i]
+		if child.Name != blockymodel.HeldItemNodeName && !child.IsSkeletonReference() &&
+			!m.isAttachmentPoint(child) && m.originalChild(bone, child.Name) != nil {
+			if err := m.attachGeometry(bone, child, childDelta, accessoryID); err != nil {
+				return err
+			}
+			continue
+		}
+		rest = append(rest, *child)
+	}
+
+	rest, err := m.filterSkeletonRefs(rest, accessoryID)
+	if err != nil {
+		return err
+	}
+	for i := range rest {
+		cloned, err := blockymodel.CloneNode(&rest[i])
+		if err != nil {
+			return fmt.Errorf("failed to clone node %s: %w", rest[i].Name, err)
+		}
+		m.reIDNode(cloned, accessoryID)
+		rest[i] = *cloned
+	}
+	if fill {
+		bone.Children = append(bone.Children, rest...)
+		return nil
+	}
+	overlay.Children = rest
+	overlay.ID = strconv.Itoa(m.nextID)
+	m.NodeSources[overlay.ID] = accessoryID
+	m.nextID++
+	bone.Children = append(bone.Children, *overlay)
+	return nil
+}
+
+// originalChild returns the direct child of baseNode named name if it came
+// with the base model. Nodes added by earlier accessories never bind.
+func (m *Merger) originalChild(baseNode *blockymodel.Node, name string) *blockymodel.Node {
+	for i := range baseNode.Children {
+		child := &baseNode.Children[i]
+		if child.Name == name && m.baseIDs[child.ID] {
+			return child
+		}
+	}
+	return nil
+}
+
+// overlaySuffix is the accessory part of an overlay node's name: the ID out
+// of a "type:ID" tracking key.
+func overlaySuffix(accessoryID string) string {
+	if i := strings.LastIndex(accessoryID, ":"); i >= 0 {
+		return accessoryID[i+1:]
+	}
+	return accessoryID
 }
 
 // addUnmatchedNode clones an attachment-reference node that has no counterpart
@@ -170,16 +291,9 @@ func (m *Merger) filterSkeletonRefs(children []blockymodel.Node, accessoryID str
 				for j := range child.Children {
 					grandchild := &child.Children[j]
 					if !grandchild.IsSkeletonReference() && !m.isAttachmentPoint(grandchild) {
-						cloned, err := blockymodel.CloneNode(grandchild)
-						if err != nil {
-							return nil, fmt.Errorf("failed to clone node %s: %w", grandchild.Name, err)
-						}
-						cloned.Children, err = m.filterSkeletonRefs(cloned.Children, accessoryID)
-						if err != nil {
+						if err := m.attachGeometry(baseNode, grandchild, identityFrame, accessoryID); err != nil {
 							return nil, err
 						}
-						m.reIDNode(cloned, accessoryID)
-						baseNode.Children = append(baseNode.Children, *cloned)
 					} else {
 						// Recurse into nested skeleton refs
 						if err := m.mergeNode(grandchild, accessoryID, baseNode); err != nil {
@@ -230,8 +344,15 @@ func (m *Merger) isAttachmentPoint(node *blockymodel.Node) bool {
 	return false
 }
 
-// reIDNode assigns new unique IDs to a node and all its children, tracking accessory source
+// reIDNode assigns new unique IDs to a node and all its children, tracking
+// accessory source. A node that reuses a base node's name without being bound
+// to it (VarsityJacket's Neck collar hangs off Chest, not Head like Player's
+// Neck) gets the accessory suffix, so a name only ever means the base node
+// to anything that drives nodes by name.
 func (m *Merger) reIDNode(node *blockymodel.Node, accessoryID string) {
+	if m.baseNames[node.Name] {
+		node.Name += "-" + overlaySuffix(accessoryID)
+	}
 	node.ID = strconv.Itoa(m.nextID)
 	m.NodeSources[node.ID] = accessoryID
 	m.nextID++
@@ -279,4 +400,13 @@ func findMaxID(nodes []blockymodel.Node) int {
 		}
 	}
 	return maxID
+}
+
+// collectIDs records the ID and name of every node into ids and names.
+func collectIDs(nodes []blockymodel.Node, ids, names map[string]bool) {
+	for i := range nodes {
+		ids[nodes[i].ID] = true
+		names[nodes[i].Name] = true
+		collectIDs(nodes[i].Children, ids, names)
+	}
 }

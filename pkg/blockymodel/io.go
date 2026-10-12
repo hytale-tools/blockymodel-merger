@@ -93,6 +93,11 @@ func cloneNode(node Node) Node {
 	return cloned
 }
 
+// Clone creates a deep copy of a Shape
+func (s *Shape) Clone() *Shape {
+	return cloneShape(s)
+}
+
 func cloneShape(shape *Shape) *Shape {
 	cloned := &Shape{
 		Type:        shape.Type,
